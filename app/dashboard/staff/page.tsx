@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  MODULES, DEFAULT_STAFF_PERMISSIONS, DEFAULT_MANAGER_PERMISSIONS, normalisePermissions,
+  MODULES, DEFAULT_STAFF_PERMISSIONS, DEFAULT_MANAGER_PERMISSIONS, normalisePermissions, normaliseFeatures,
 } from '@/lib/modules'
 import { apiGet, apiPost, apiPut, apiDelete, handleApiError } from '@/lib/api-client'
 import { LoadingOrOffline } from '@/components/offline-indicator'
@@ -213,33 +213,24 @@ export default function StaffPage() {
 
   useEffect(() => { checkAccess(); fetchStaff(); fetchOwner(); fetchBranches(); loadTenantFeatures() }, [])
 
-  function loadTenantFeatures() {
+  async function loadTenantFeatures() {
     try {
-      // Read from sidebar cache using the same key
-      const cached = localStorage.getItem('sidebar_tenant_features')
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        setTenantFeatures(parsed)
+      const res = await fetch('/api/tenant/config')
+      if (res.ok) {
+        const data = await res.json()
+        setTenantFeatures(normaliseFeatures(data.features ?? {}))
       } else {
-        // Fallback: show all features if cache is empty
-        const allFeatures: Record<string, boolean> = {}
-        MODULES.forEach(mod => {
-          mod.features.forEach(f => {
-            allFeatures[f.key] = true
-          })
-        })
-        setTenantFeatures(allFeatures)
+        // Not provisioned in admin DB (e.g. default-DB tenant) — fall back to
+        // the sidebar cache if available, otherwise show nothing extra.
+        const cached = localStorage.getItem('sidebar_tenant_features')
+        if (cached) {
+          setTenantFeatures(normaliseFeatures(JSON.parse(cached)))
+        }
+        // If neither source is available, tenantFeatures stays {} and the
+        // permissions modal will show no module sections — safe default.
       }
     } catch (e) {
       console.error('Failed to load tenant features:', e)
-      // On error, fallback to showing all features
-      const allFeatures: Record<string, boolean> = {}
-      MODULES.forEach(mod => {
-        mod.features.forEach(f => {
-          allFeatures[f.key] = true
-        })
-      })
-      setTenantFeatures(allFeatures)
     }
   }
 
