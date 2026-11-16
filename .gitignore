@@ -47,6 +47,9 @@ test-*.js
 check-*.js
 get-*.js
 
+# Migration scripts — client-specific, not for version control
+scripts/
+
 # Backup files
 *.bak
 *.backup
