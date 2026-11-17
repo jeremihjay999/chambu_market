@@ -385,7 +385,7 @@ export default function DeployMobileShopPage() {
                     No products found
                   </div>
                 ) : (
-                  filteredProducts.slice(0, 10).map((product) => (
+                  filteredProducts.map((product) => (
                     <div
                       key={product._id}
                       onClick={() => addStockItem(product)}

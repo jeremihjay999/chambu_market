@@ -40,6 +40,7 @@ export function AlertsWidget() {
         .sort((a: any, b: any) => b.creditBalance - a.creditBalance)
         .slice(0, 5)
 
+
       setAlerts({
         lowStockCount: lowStockData?.pagination?.totalLowStock || 0,
         lowStockEstimatedCost: lowStockData?.statistics?.estimatedCost || 0,

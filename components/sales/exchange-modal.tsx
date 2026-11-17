@@ -745,7 +745,7 @@ export function ExchangeModal({ open, onOpenChange, sale, onSuccess }: ExchangeM
 
                   {filteredNewProducts.length > 0 ? (
                     <div className="space-y-1.5 max-h-44 overflow-y-auto">
-                      {filteredNewProducts.slice(0, 10).map(product => (
+                      {filteredNewProducts.map(product => (
                         <button
                           key={product._id}
                           type="button"

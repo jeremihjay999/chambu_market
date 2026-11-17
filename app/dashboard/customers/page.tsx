@@ -528,7 +528,7 @@ Thank you for choosing ${businessName}!`
                         <p className="text-xs text-gray-400 py-1">No transactions</p>
                       ) : (
                         <div className="space-y-0.5 max-h-32 overflow-y-auto">
-                          {[...c.ledger].reverse().slice(0, 5).map((entry, i) => {
+                          {[...c.ledger].reverse().map((entry, i) => {
                             // Resolve label + color per ledger type
                             let label = 'Adj'
                             let labelClass = 'text-gray-600'

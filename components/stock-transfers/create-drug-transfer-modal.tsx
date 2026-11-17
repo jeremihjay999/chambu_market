@@ -219,7 +219,7 @@ export function CreateDrugTransferModal({ isOpen, onClose, onSuccess }: CreateDr
                     No drugs found
                   </div>
                 ) : (
-                  filteredDrugs.slice(0, 10).map(drug => (
+                  filteredDrugs.map(drug => (
                     <button
                       key={drug._id}
                       onClick={() => addItem(drug)}
