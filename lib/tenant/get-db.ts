@@ -49,9 +49,23 @@ export async function getTenantDB(_request?: NextRequest) {
         const features = normaliseFeatures(payload.tenantFeatures || {})
         const conn = await connectTenantDB(payload.mongoUri)
         return { conn, models: getModels(conn), features }
-      } catch (error) {
-        console.error('[getTenantDB] Failed to connect to tenant URI:', error)
-        throw error  // preserve original error type for isMongoOfflineError checks
+      } catch (primaryError) {
+        // If the primary URI fails with a network error and we have a
+        // fallback URI, try that before giving up.
+        if (isMongoOfflineError(primaryError) && payload.mongoUriFallback) {
+          console.warn('[getTenantDB] Primary URI failed, trying fallback URI...')
+          try {
+            const features = normaliseFeatures(payload.tenantFeatures || {})
+            const conn = await connectTenantDB(payload.mongoUriFallback)
+            console.warn('[getTenantDB] Connected via fallback URI')
+            return { conn, models: getModels(conn), features }
+          } catch (fallbackError) {
+            console.error('[getTenantDB] Fallback URI also failed:', fallbackError)
+            throw fallbackError
+          }
+        }
+        console.error('[getTenantDB] Failed to connect to tenant URI:', primaryError)
+        throw primaryError
       }
     }
 

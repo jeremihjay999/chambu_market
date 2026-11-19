@@ -1,6 +1,7 @@
 import { getAdminModels } from '@/lib/admin-models'
 import { connectTenantDB } from '@/lib/db-tenant'
 import { getModels } from '@/lib/tenant/get-models'
+import { isMongoOfflineError } from '@/lib/tenant/get-db'
 import { createToken, setAuthCookie } from '@/lib/jwt'
 import { DEMO_EMAIL, DEMO_PASSWORD, DEMO_USER_ID, getDemoUser } from '@/lib/demo'
 import { normaliseFeatures, normalisePermissions, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
@@ -14,6 +15,7 @@ interface Candidate {
   record: any
   type: 'user' | 'staff'
   mongoUri: string
+  mongoUriFallback: string
   features: Record<string, boolean>
 }
 
@@ -82,9 +84,34 @@ export async function POST(request: NextRequest) {
           
           console.log(`[login]   Entry ${i+1}/${emailEntries.length} (${tenant.shopName}): Checking ${entry.userType}...`)
           
-          // Connect to tenant DB
+          // Connect to tenant DB — try mongoUri first, fall back to mongoUriFallback on network error.
+          // If mongoUriFallback not stored yet, derive it from the cluster's uri2.
+          let resolvedFallback = tenant.mongoUriFallback || ''
+          if (!resolvedFallback && tenant.clusterId) {
+            try {
+              const { Cluster: ClusterModel } = await getAdminModels()
+              const cl = await ClusterModel.findById(tenant.clusterId).lean() as any
+              if (cl?.uri2) {
+                const base = cl.uri2.trim().split('?')[0].replace(/\/$/, '')
+                const qs   = cl.uri2.includes('?') ? '?' + cl.uri2.split('?').slice(1).join('?') : ''
+                resolvedFallback = `${base}/${tenant.subdomain}${qs}`
+              }
+            } catch {}
+          }
+
           const connStart = Date.now()
-          const conn = await connectTenantDB(tenant.mongoUri)
+          let conn
+          try {
+            conn = await connectTenantDB(tenant.mongoUri)
+          } catch (primaryErr) {
+            if (isMongoOfflineError(primaryErr) && resolvedFallback) {
+              console.warn(`[login]   Primary URI failed, trying fallback URI...`)
+              conn = await connectTenantDB(resolvedFallback)
+              console.warn(`[login]   Connected via fallback URI`)
+            } else {
+              throw primaryErr
+            }
+          }
           const connTime = Date.now() - connStart
           totalConnectionTime += connTime
           
@@ -103,7 +130,8 @@ export async function POST(request: NextRequest) {
               ownerCandidates.push({ 
                 record: userRecord, 
                 type: 'user', 
-                mongoUri: tenant.mongoUri, 
+                mongoUri: tenant.mongoUri,
+                mongoUriFallback: tenant.mongoUriFallback || '',
                 features 
               })
             } else {
@@ -119,7 +147,8 @@ export async function POST(request: NextRequest) {
               staffCandidates.push({ 
                 record: staffRecord, 
                 type: 'staff', 
-                mongoUri: tenant.mongoUri, 
+                mongoUri: tenant.mongoUri,
+                mongoUriFallback: tenant.mongoUriFallback || '',
                 features 
               })
             } else {
@@ -170,12 +199,12 @@ export async function POST(request: NextRequest) {
       const defaultUser = await defaultModels.User.findOne({ email }).select('+password')
       if (defaultUser) {
         console.log('[login]   ✓ Owner candidate in default DB')
-        ownerCandidates.push({ record: defaultUser, type: 'user', mongoUri: '', features: DEFAULT_MODULE_FEATURES })
+        ownerCandidates.push({ record: defaultUser, type: 'user', mongoUri: '', mongoUriFallback: '', features: DEFAULT_MODULE_FEATURES })
       }
       const defaultStaff = await defaultModels.Staff.findOne({ email, active: true }).select('+password')
       if (defaultStaff) {
         console.log('[login]   ✓ Staff candidate in default DB')
-        staffCandidates.push({ record: defaultStaff, type: 'staff', mongoUri: '', features: DEFAULT_MODULE_FEATURES })
+        staffCandidates.push({ record: defaultStaff, type: 'staff', mongoUri: '', mongoUriFallback: '', features: DEFAULT_MODULE_FEATURES })
       }
       
       timings.defaultDbCheck = Date.now() - defaultDbStart
@@ -255,8 +284,9 @@ export async function POST(request: NextRequest) {
       role:           winner.record.role,
       type:           winner.type,
       adminId:        winner.type === 'staff' ? winner.record.userId?.toString() : undefined,
-      mongoUri:       winner.mongoUri || undefined,
-      tenantFeatures: winner.mongoUri ? winner.features : undefined,
+      mongoUri:         winner.mongoUri || undefined,
+      mongoUriFallback: winner.mongoUriFallback || undefined,
+      tenantFeatures:   winner.mongoUri ? winner.features : undefined,
       permissions:    winner.type === 'staff' ? normalisePermissions(winner.record.permissions || {}) : undefined,
     }
     

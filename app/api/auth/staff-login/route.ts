@@ -1,5 +1,6 @@
 import { connectTenantDB } from '@/lib/db-tenant'
 import { getModels } from '@/lib/tenant/get-models'
+import { isMongoOfflineError } from '@/lib/tenant/get-db'
 import { createToken, setAuthCookie } from '@/lib/jwt'
 import { normaliseFeatures, normalisePermissions, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
 import { getAdminModels } from '@/lib/admin-models'
@@ -71,6 +72,7 @@ export async function POST(request: NextRequest) {
     let foundStaff: any = null
     let foundOwner: any = null
     let foundMongoUri = ''
+    let foundMongoUriFallback = ''
     let foundFeatures: Record<string, boolean> = DEFAULT_MODULE_FEATURES
 
     // ── Indexed path: connect to exactly the tenant(s) the index points to ──
@@ -90,7 +92,17 @@ export async function POST(request: NextRequest) {
 
           console.log(`[staff-login]   Entry ${i + 1} (${tenant.shopName}): connecting...`)
           const connStart = Date.now()
-          const conn = await connectTenantDB(tenant.mongoUri)
+          let conn
+          try {
+            conn = await connectTenantDB(tenant.mongoUri)
+          } catch (primaryErr) {
+            if (isMongoOfflineError(primaryErr) && tenant.mongoUriFallback) {
+              console.warn(`[staff-login]   Primary URI failed, trying fallback URI...`)
+              conn = await connectTenantDB(tenant.mongoUriFallback)
+            } else {
+              throw primaryErr
+            }
+          }
           const connTime = Date.now() - connStart
 
           const models = getModels(conn)
@@ -104,6 +116,7 @@ export async function POST(request: NextRequest) {
               foundStaff = staff
               foundOwner = owner
               foundMongoUri = tenant.mongoUri
+              foundMongoUriFallback = tenant.mongoUriFallback || ''
               foundFeatures = normaliseFeatures(tenant.features || {})
               console.log(
                 `[staff-login]   ✓ Staff found (conn: ${connTime}ms, query: ${queryTime}ms)\n`
@@ -144,7 +157,17 @@ export async function POST(request: NextRequest) {
         const tenant = tenants[i]
         try {
           const connStart = Date.now()
-          const conn = await connectTenantDB(tenant.mongoUri)
+          let conn
+          try {
+            conn = await connectTenantDB(tenant.mongoUri)
+          } catch (primaryErr) {
+            if (isMongoOfflineError(primaryErr) && tenant.mongoUriFallback) {
+              console.warn(`[staff-login]   Primary URI failed (full scan), trying fallback URI...`)
+              conn = await connectTenantDB(tenant.mongoUriFallback)
+            } else {
+              throw primaryErr
+            }
+          }
           const connTime = Date.now() - connStart
           totalConnectionTime += connTime
 
@@ -164,6 +187,7 @@ export async function POST(request: NextRequest) {
               foundStaff = staff
               foundOwner = owner
               foundMongoUri = tenant.mongoUri
+              foundMongoUriFallback = tenant.mongoUriFallback || ''
               foundFeatures = normaliseFeatures(tenant.features || {})
               console.log(`[staff-login]   ✓ Owner found, stopping search at tenant ${i + 1}/${tenants.length}\n`)
               break
@@ -259,6 +283,7 @@ export async function POST(request: NextRequest) {
       isBranchManager,
       managerOfBranches,
       mongoUri: foundMongoUri || undefined,
+      mongoUriFallback: foundMongoUriFallback || undefined,
       tenantFeatures: foundMongoUri ? foundFeatures : undefined,
       permissions: staffPermissions,
       isCashierMode,

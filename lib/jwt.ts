@@ -10,6 +10,7 @@ export interface TokenPayload {
   type: 'user' | 'staff'
   adminId?: string          // For staff: the owner's userId
   mongoUri?: string         // Tenant DB URI — embedded at login, no subdomain lookup needed
+  mongoUriFallback?: string // Fallback URI (standard mongodb://) if SRV fails
   tenantFeatures?: Record<string, boolean>  // Tenant feature flags
   permissions?: Record<string, boolean>     // Staff permissions (staff only)
   isDemo?: boolean

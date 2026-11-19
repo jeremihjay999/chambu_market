@@ -38,15 +38,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Cluster is full (${cluster.tenantCount}/${cluster.maxTenants})` }, { status: 400 })
   }
 
-  // Build the MongoDB URI: insert database name before query string
-  // e.g. mongodb://user:pass@host:27017/?ssl=true  →  mongodb://user:pass@host:27017/test1?ssl=true
-  const uriParts = cluster.baseUri.split('?')
-  const mongoUri = uriParts.length > 1
-    ? `${uriParts[0].replace(/\/$/, '')}/${subdomain}?${uriParts[1]}`
-    : `${cluster.baseUri.replace(/\/$/, '')}/${subdomain}`
+  // Inserts the db name (subdomain) into a base URI before any query string.
+  function buildUri(base: string): string {
+    if (!base) return ''
+    const [hostPart, ...queryParts] = base.trim().replace(/\/$/, '').split('?')
+    return queryParts.length > 0
+      ? `${hostPart}/${subdomain}?${queryParts.join('?')}`
+      : `${hostPart}/${subdomain}`
+  }
+
+  // mongoUri from uri1, mongoUriFallback from uri2 (if present and different)
+  const mongoUri         = buildUri(cluster.uri1)
+  const mongoUriFallback = cluster.uri2 ? buildUri(cluster.uri2) : ''
+
+  if (!mongoUri) return NextResponse.json({ error: 'Cluster has no URI configured' }, { status: 400 })
 
   const normalisedFeatures = normaliseFeatures(features || DEFAULT_MODULE_FEATURES)
-  const tenant = new Tenant({ subdomain, mongoUri, shopName, features: normalisedFeatures, isActive: true })
+  const tenant = new Tenant({ subdomain, mongoUri, mongoUriFallback, shopName, features: normalisedFeatures, isActive: true, clusterId })
   await tenant.save()
 
   // Increment cluster tenant count

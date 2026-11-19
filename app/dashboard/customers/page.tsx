@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Search, Plus, X, ChevronDown, ChevronUp, CreditCard, Mail, Phone, User, Calendar, MessageCircle, FileText } from 'lucide-react'
+import { Search, Plus, X, ChevronDown, ChevronUp, CreditCard, Mail, Phone, User, Calendar, MessageCircle, FileText, Edit2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
@@ -435,126 +435,147 @@ Thank you for choosing ${businessName}!`
             {search ? 'No customers match your search.' : 'No customers yet. Add your first one.'}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-            {customers.map(c => (
-              <div key={c._id} className="bg-white rounded-lg border border-gray-200 overflow-hidden hover:shadow-sm transition-shadow">
-                {/* Card Content */}
-                <div className="p-2.5">
-                  <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="space-y-2">
+            {customers.map(c => {
+              const hasCredit   = c.creditBalance > 0
+              const hasDeposit  = (c.depositBalance || 0) > 0
+              const isClear     = !hasCredit && !hasDeposit
+              return (
+                <div key={c._id} className={`bg-white rounded-lg border overflow-hidden hover:shadow-sm transition-shadow ${
+                  hasCredit ? 'border-red-200' : hasDeposit ? 'border-teal-200' : 'border-gray-200'
+                }`}>
+                  {/* Row */}
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    {/* Avatar */}
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                      hasCredit ? 'bg-red-100' : hasDeposit ? 'bg-teal-100' : 'bg-gray-100'
+                    }`}>
+                      <User size={16} className={
+                        hasCredit ? 'text-red-500' : hasDeposit ? 'text-teal-600' : 'text-gray-500'
+                      } />
+                    </div>
+
+                    {/* Name + contact */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-sm text-gray-900 truncate">{c.name}</h3>
-                      {c.phone && <p className="text-xs text-gray-500 truncate">{c.phone}</p>}
+                      <p className="font-semibold text-sm text-gray-900 truncate">{c.name}</p>
+                      <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                        {c.phone && (
+                          <span className="flex items-center gap-1 text-xs text-gray-400">
+                            <Phone size={10} />{c.phone}
+                          </span>
+                        )}
+                        {c.email && (
+                          <span className="text-xs text-gray-400 truncate max-w-[160px]">{c.email}</span>
+                        )}
+                        {!c.phone && !c.email && (
+                          <span className="text-xs text-gray-400 italic">No contact info</span>
+                        )}
+                      </div>
                     </div>
-                    <button
-                      onClick={() => setExpanded(expanded === c._id ? null : c._id)}
-                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
-                    >
-                      {expanded === c._id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
-                  </div>
 
-                  {/* Credit Info */}
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <div>
-                      {c.creditBalance > 0 ? (
-                        <span className="text-red-600 font-semibold">-KES {c.creditBalance.toLocaleString()}</span>
+                    {/* Credit limit — hidden on mobile */}
+                    <div className="hidden sm:flex flex-col items-end gap-0.5 shrink-0 min-w-[90px]">
+                      {c.creditLimit > 0 ? (
+                        <span className="text-xs text-gray-400">Limit: KES {c.creditLimit.toLocaleString()}</span>
                       ) : (
-                        <span className="text-green-600 font-medium">Clear</span>
+                        <span className="text-xs text-gray-400 italic">No limit</span>
                       )}
-                    </div>
-                    <div className="text-gray-400">
-                      {c.creditLimit > 0 ? `Limit: ${c.creditLimit.toLocaleString()}` : 'No limit'}
-                    </div>
-                  </div>
-
-                  {/* Deposit balance (prepayment we owe the customer) — click to manage/refund */}
-                  {c.depositBalance > 0 && (
-                    <button
-                      onClick={() => { setDepositsCustomer(c); setShowDepositsDialog(true) }}
-                      className="w-full flex items-center justify-between text-xs mb-2 bg-teal-50 -mx-2.5 px-2.5 py-1 rounded hover:bg-teal-100 transition-colors"
-                    >
-                      <span className="text-teal-700 font-medium">Store Credit</span>
-                      <span className="text-teal-800 font-semibold">+KES {c.depositBalance.toLocaleString()}</span>
-                    </button>
-                  )}
-
-                  {/* Actions */}
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => openEditCustomer(c)}
-                      className="flex-1 px-2 py-1 text-xs font-medium text-blue-600 border border-blue-200 rounded hover:bg-blue-50 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    {canTakeDeposits && (
-                      <button
-                        onClick={() => { setDepositCustomer(c); setShowDeposit(true) }}
-                        className="flex-1 px-2 py-1 text-xs font-medium text-teal-700 border border-teal-300 rounded hover:bg-teal-50 transition-colors"
-                      >
-                        Deposit
-                      </button>
-                    )}
-                    {c.creditBalance > 0 ? (
-                      <button
-                        onClick={() => { setPayCustomer(c); setPayAmount(String(c.creditBalance)) }}
-                        className="flex-1 px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors"
-                      >
-                        Pay
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => shareInvoiceViaWhatsApp(c)}
-                        disabled={!c.phone}
-                        className="flex-1 px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors disabled:opacity-40"
-                      >
-                        <MessageCircle size={11} className="inline" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Expanded Ledger */}
-                {expanded === c._id && (
-                  <div className="px-2.5 pb-2.5 bg-gray-50 border-t border-gray-200">
-                    <div className="mt-2">
                       {c.idNumber && (
-                        <p className="text-xs text-gray-500 mb-1">ID: {c.idNumber}</p>
+                        <span className="text-xs text-gray-400">ID: {c.idNumber}</span>
                       )}
-                      {c.email && (
-                        <p className="text-xs text-gray-500 mb-2 truncate">{c.email}</p>
+                    </div>
+
+                    {/* Status badges */}
+                    <div className="flex flex-col gap-1 shrink-0 items-end min-w-[90px]">
+                      {isClear ? (
+                        <span className="text-xs font-medium text-green-600 bg-green-50 border border-green-200 rounded px-2 py-0.5">Clear</span>
+                      ) : (
+                        <>
+                          {hasCredit && (
+                            <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded px-2 py-0.5 whitespace-nowrap">
+                              Owes KES {c.creditBalance.toLocaleString()}
+                            </span>
+                          )}
+                          {hasDeposit && (
+                            <button
+                              onClick={() => { setDepositsCustomer(c); setShowDepositsDialog(true) }}
+                              className="text-xs font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-0.5 whitespace-nowrap hover:bg-teal-100 transition-colors"
+                            >
+                              +KES {c.depositBalance.toLocaleString()}
+                            </button>
+                          )}
+                        </>
                       )}
-                      <p className="text-xs font-medium text-gray-700 mb-1">History</p>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => openEditCustomer(c)}
+                        className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                        title="Edit"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                      {canTakeDeposits && (
+                        <button
+                          onClick={() => { setDepositCustomer(c); setShowDeposit(true) }}
+                          className="p-1.5 rounded hover:bg-teal-50 text-teal-500 hover:text-teal-700 transition-colors"
+                          title="Take deposit"
+                        >
+                          <CreditCard size={14} />
+                        </button>
+                      )}
+                      {hasCredit ? (
+                        <button
+                          onClick={() => { setPayCustomer(c); setPayAmount(String(c.creditBalance)) }}
+                          className="px-2.5 py-1 text-xs font-semibold rounded bg-green-600 hover:bg-green-700 text-white transition-colors"
+                        >
+                          Pay
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => shareInvoiceViaWhatsApp(c)}
+                          disabled={!c.phone}
+                          className="p-1.5 rounded hover:bg-green-50 text-green-500 hover:text-green-700 transition-colors disabled:opacity-40"
+                          title="WhatsApp"
+                        >
+                          <MessageCircle size={14} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setExpanded(expanded === c._id ? null : c._id)}
+                        className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                      >
+                        {expanded === c._id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expanded Ledger */}
+                  {expanded === c._id && (
+                    <div className="px-4 pb-3 pt-2 bg-gray-50 border-t border-gray-100">
+                      <p className="text-xs font-medium text-gray-600 mb-1.5">Transaction history</p>
                       {c.ledger.length === 0 ? (
                         <p className="text-xs text-gray-400 py-1">No transactions</p>
                       ) : (
-                        <div className="space-y-0.5 max-h-32 overflow-y-auto">
+                        <div className="space-y-0.5 max-h-40 overflow-y-auto">
                           {[...c.ledger].reverse().map((entry, i) => {
-                            // Resolve label + color per ledger type
                             let label = 'Adj'
                             let labelClass = 'text-gray-600'
                             let amountClass = entry.amount < 0 ? 'text-green-600' : 'text-red-500'
                             if (entry.type === 'payment') {
-                              label = 'Payment'
-                              labelClass = 'text-green-600'
+                              label = 'Payment'; labelClass = 'text-green-600'
                             } else if (entry.type === 'purchase') {
-                              label = 'Purchase'
-                              labelClass = 'text-gray-600'
+                              label = 'Purchase'; labelClass = 'text-gray-600'
                             } else if (entry.type === 'deposit') {
-                              label = 'Deposit'
-                              labelClass = 'text-teal-700'
-                              amountClass = 'text-teal-700'  // prepayment received (we owe them)
+                              label = 'Deposit'; labelClass = 'text-teal-700'; amountClass = 'text-teal-700'
                             } else if (entry.type === 'deposit_use') {
-                              label = 'Used'
-                              labelClass = 'text-cyan-700'
-                              amountClass = 'text-cyan-700'  // prepayment consumed at pickup
+                              label = 'Used'; labelClass = 'text-cyan-700'; amountClass = 'text-cyan-700'
                             } else if (entry.type === 'deposit_refund') {
-                              label = 'Refund'
-                              labelClass = 'text-orange-600'
-                              amountClass = 'text-orange-600'  // prepayment returned
+                              label = 'Refund'; labelClass = 'text-orange-600'; amountClass = 'text-orange-600'
                             } else if (entry.type === 'deposit_return') {
-                              label = 'Return'
-                              labelClass = 'text-teal-700'
-                              amountClass = 'text-teal-700'  // deposit credited back (goods returned)
+                              label = 'Return'; labelClass = 'text-teal-700'; amountClass = 'text-teal-700'
                             }
                             return (
                               <div key={i} className="flex items-center justify-between text-xs py-1 border-b border-gray-100 last:border-0">
@@ -563,14 +584,14 @@ Thank you for choosing ${businessName}!`
                                   <span className={amountClass}>
                                     {entry.amount < 0 ? '-' : '+'}KES {Math.abs(entry.amount).toLocaleString()}
                                   </span>
-                                  <span className="text-gray-300 text-xs">{new Date(entry.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                                  <span className="text-gray-300">{new Date(entry.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
                                 </div>
                               </div>
                             )
                           })}
                         </div>
                       )}
-                      {c.creditBalance > 0 && (
+                      {hasCredit && (
                         <button
                           onClick={() => setInvoiceCustomer(c)}
                           disabled={!c.phone}
@@ -581,10 +602,10 @@ Thank you for choosing ${businessName}!`
                         </button>
                       )}
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </LoadingOrOffline>

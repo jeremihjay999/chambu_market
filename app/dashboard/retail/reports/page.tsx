@@ -1,3 +1,4 @@
 // ─── /dashboard/retail/reports ───────────────────────────────────────────────
-// Canonical Retail → Reports route.
-export { default } from '@/app/dashboard/reports/page'
+// Reports landing page — shared with /dashboard/reports.
+export { default } from '@/app/dashboard/reports/index'
+
