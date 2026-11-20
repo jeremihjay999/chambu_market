@@ -48,6 +48,11 @@ interface Sale {
   staffId?: {
     name: string
   }
+  customerName?: string
+  customerPhone?: string
+  debt?: number
+  amountPaid?: number
+  paymentStatus?: 'paid' | 'partial' | 'unpaid'
   rentalMeta?: {
     serviceName?: string
     serviceCategory?: string

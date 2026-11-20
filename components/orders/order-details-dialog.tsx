@@ -124,6 +124,13 @@ interface OrderDetailsDialogProps {
     isPartiallyReturned?: boolean
     isFullyReturned?: boolean
     payments?: PaymentEntry[]
+    // Customer info — stored on sale at checkout time
+    customerName?: string
+    customerPhone?: string
+    // Debt tracking — stored on sale by the POST handler
+    debt?: number
+    amountPaid?: number
+    paymentStatus?: 'paid' | 'partial' | 'unpaid'
   } | null
   canDeleteOrders?: boolean
   onOrderDeleted?: (orderId: string) => void
@@ -386,6 +393,15 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder, ca
                 {staffName}
               </span>
             </div>
+            {order.customerName && (
+              <div className="col-span-2">
+                <span className="text-muted-foreground">Customer:</span>
+                <span className="ml-2 font-semibold">{order.customerName}</span>
+                {order.customerPhone && (
+                  <span className="ml-2 text-muted-foreground text-xs">{order.customerPhone}</span>
+                )}
+              </div>
+            )}
             <div className="col-span-2">
               <span className="text-muted-foreground">Payment:</span>
               <div className="ml-2 font-semibold">
@@ -1114,6 +1130,10 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder, ca
             mpesaPaybill={settings.payment?.mpesaPaybill}
             mpesaAccountNumber={settings.payment?.mpesaAccountNumber}
             paperSize={settings.receipt?.paperSize || '80mm'}
+            customerName={order.customerName}
+            customerPhone={order.customerPhone}
+            cashPaid={order.amountPaid != null ? order.amountPaid : order.payments?.reduce((s, p) => s + p.amount, 0)}
+            debtCreated={order.debt && order.debt > 0 ? order.debt : undefined}
             returns={order.returns}
             totalReturned={order.totalReturned}
             isPartiallyReturned={order.isPartiallyReturned}
