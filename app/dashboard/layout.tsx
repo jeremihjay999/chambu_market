@@ -11,6 +11,7 @@ import { DemoBanner } from '@/components/demo/demo-banner'
 import { NetworkStatusProvider } from '@/components/network-status-provider'
 import { Toaster } from 'sonner'
 import PaymentNotificationOverlay from '@/components/payment-notification-overlay'
+import { SetupBranchModal } from '@/components/dashboard/setup-branch-modal'
 import { initAutoSync } from '@/lib/sync'
 
 const SIDEBAR_STORAGE_KEY = 'sidebar-collapsed'
@@ -25,6 +26,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     daysOverdue: number
   } | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // Branch setup gate — shown to owners who have no branch yet
+  const [requiresBranchSetup, setRequiresBranchSetup] = useState(false)
+  const [shopName, setShopName] = useState('')
 
   // Rehydrate from localStorage on mount (avoids SSR mismatch)
   useEffect(() => {
@@ -43,13 +48,17 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    fetch('/api/tenant/config')
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data?.paymentNotification) setPaymentNotification(data.paymentNotification)
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
+    Promise.all([
+      fetch('/api/tenant/config').then(res => res.ok ? res.json() : null),
+      fetch('/api/auth/me', { credentials: 'include' }).then(res => res.ok ? res.json() : null),
+    ]).then(([configData, meData]) => {
+      if (configData?.paymentNotification) setPaymentNotification(configData.paymentNotification)
+      if (meData?.user?.requiresBranchSetup) {
+        setRequiresBranchSetup(true)
+        setShopName(meData.user.shopName || meData.user.name || '')
+      }
+      setLoading(false)
+    }).catch(() => setLoading(false))
   }, [])
 
   const showOverlay = !loading && paymentNotification?.enabled && paymentNotification?.paymentUrl
@@ -62,6 +71,15 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <ConflictNotification />
         <InstallPrompt />
         <Toaster position="top-right" />
+
+        {/* One-time branch setup gate — shown until the owner creates their first branch */}
+        {requiresBranchSetup && (
+          <SetupBranchModal
+            shopName={shopName}
+            onComplete={() => setRequiresBranchSetup(false)}
+          />
+        )}
+
         <Sidebar collapsed={sidebarCollapsed} onCollapsedChange={handleCollapsedChange} />
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           <DemoBanner />

@@ -5,6 +5,28 @@ import { getModels } from '@/lib/tenant/get-models'
 import { verifyAdminSession } from '../../../auth/route'
 import { checkEmailExistsAcrossTenants } from '@/lib/auth/check-email-exists'
 
+/**
+ * Ensures the URI has exactly one database name segment after the authority.
+ * Fixes double-slash URIs like mongodb+srv://host//dbname → mongodb+srv://host/dbname
+ */
+function repairMongoUri(uri: string): string {
+  if (!uri) return uri
+  const qIdx = uri.indexOf('?')
+  const hostPart = qIdx >= 0 ? uri.slice(0, qIdx) : uri
+  const queryPart = qIdx >= 0 ? uri.slice(qIdx) : ''
+
+  const schemeEnd = hostPart.indexOf('//') + 2
+  const pathStart = hostPart.indexOf('/', schemeEnd)
+  if (pathStart < 0) return uri
+
+  const authority = hostPart.slice(0, pathStart)
+  const rawPath = hostPart.slice(pathStart).replace(/^\/+/, '')
+  if (!rawPath) return uri
+
+  const dbName = rawPath.split('/').filter(Boolean).pop() || rawPath
+  return `${authority}/${dbName}${queryPart}`
+}
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!await verifyAdminSession(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -23,7 +45,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!tenant) return NextResponse.json({ error: 'Tenant not found' }, { status: 404 })
 
     console.log('[update-owner] Connecting to tenant DB:', tenant.mongoUri)
-    const conn = await connectTenantDB(tenant.mongoUri)
+    const safeUri = repairMongoUri(tenant.mongoUri)
+    if (safeUri !== tenant.mongoUri) {
+      console.warn('[update-owner] Repaired malformed mongoUri:', tenant.mongoUri, '->', safeUri)
+      await Tenant.findByIdAndUpdate(id, { $set: { mongoUri: safeUri } })
+    }
+    const conn = await connectTenantDB(safeUri)
     const { User } = getModels(conn)
 
     // Find existing owner

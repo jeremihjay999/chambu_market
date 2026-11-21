@@ -1,5 +1,6 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 import { canSeeBuyingPrice, buyingPriceForbidden } from '@/lib/buying-price'
 import { NextRequest, NextResponse } from 'next/server'
 import Papa from 'papaparse'
@@ -12,6 +13,7 @@ export async function POST(request: NextRequest) {
     if (!canSeeBuyingPrice(payload)) return buyingPriceForbidden()
 
     const { models } = await getTenantDB(request)
+    const branchId = await getBranchContext(request)
     const formData = await request.formData()
     const file = formData.get('file') as File
     const mappingStr = formData.get('mapping') as string
@@ -78,6 +80,58 @@ export async function POST(request: NextRequest) {
 
     let inserted: any[] = []
     if (newProducts.length) inserted = await models.Product.insertMany(newProducts)
+
+    // Create / update branch-scoped inventory records for every inserted product
+    if (branchId && inserted.length) {
+      const bulkOps = inserted.map((product: any) => ({
+        updateOne: {
+          filter: { userId: ownerId, branchId, productId: product._id },
+          update: {
+            $set: {
+              stock:       product.stock ?? 0,
+              lastUpdated: new Date(),
+            },
+            $setOnInsert: {
+              userId:    ownerId,
+              branchId,
+              productId:  product._id,
+              reserved:   0,
+              createdAt:  new Date(),
+            },
+          },
+          upsert: true,
+        },
+      }))
+      await models.ProductInventory.bulkWrite(bulkOps, { ordered: false })
+      console.log(`[import] Upserted ${bulkOps.length} ProductInventory records for branch ${branchId}`)
+    }
+
+    // Also upsert inventory for products that already existed in the catalog (duplicates)
+    // so re-importing the same file brings orphaned products into the branch
+    if (branchId && duplicates.length) {
+      const existingProducts = await models.Product.find({
+        userId: ownerId,
+        $or: duplicates.map(p => ({ productName: p.productName, category: p.category })),
+      }).lean() as any[]
+
+      if (existingProducts.length) {
+        // Build a map from "productName|category" → CSV stock value
+        const stockMap = new Map(duplicates.map(p => [`${p.productName}|${p.category}`, p.stock ?? 0]))
+
+        const dupBulkOps = existingProducts.map((product: any) => ({
+          updateOne: {
+            filter: { userId: ownerId, branchId, productId: product._id },
+            update: {
+              $set:        { stock: stockMap.get(`${product.productName}|${product.category}`) ?? 0, lastUpdated: new Date() },
+              $setOnInsert: { userId: ownerId, branchId, productId: product._id, reserved: 0, createdAt: new Date() },
+            },
+            upsert: true,
+          },
+        }))
+        await models.ProductInventory.bulkWrite(dupBulkOps, { ordered: false })
+        console.log(`[import] Upserted ${dupBulkOps.length} ProductInventory records for existing products in branch ${branchId}`)
+      }
+    }
 
     for (const name of uniqueCategories) {
       const count = await models.Product.countDocuments({ userId: ownerId, category: name })

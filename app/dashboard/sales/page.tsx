@@ -861,12 +861,27 @@ function SalesPageContent() {
       return
     }
     // Save cart to session storage and navigate to payment page
+    // Capture the branchId from the cookie at the moment the cashier clicks
+    // "Complete Sale" so the payment page always fetches the receipt phone for
+    // THIS branch, regardless of what the cookie says when it mounts.
+    const activeBranchIdCookie = document.cookie
+      .split('; ')
+      .find(row => row.startsWith('selected_branch='))
+      ?.split('=')[1] || null
+
+    // Generate a one-time idempotency key for this cart submission.
+    // The API will reject any second POST that carries the same key so
+    // double-submits (network retry, page refresh) cannot create duplicates.
+    const idempotencyKey = crypto.randomUUID()
+
     sessionStorage.setItem('pendingSale', JSON.stringify({
       cart,
       cartDiscount,
       saleEndpoint: '/api/sales',
       returnUrl: '/dashboard/sales',
       saleType: isWholesaleMode ? 'wholesale' : 'retail',
+      branchId: activeBranchIdCookie,
+      idempotencyKey,
     }))
     router.push('/dashboard/sales/payment')
   }

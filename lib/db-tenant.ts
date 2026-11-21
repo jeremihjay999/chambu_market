@@ -30,7 +30,43 @@ function getStats(): Map<string, { hits: number; misses: number; lastUsed: numbe
 // Max tenant connections cached per instance — prevents runaway connection growth
 const MAX_CACHED_TENANTS = 10
 
+/**
+ * Repairs malformed MongoDB URIs that have a double slash before the database name.
+ * e.g. mongodb://host:27017//dbname  →  mongodb://host:27017/dbname
+ *      mongodb+srv://host//dbname    →  mongodb+srv://host/dbname
+ * Also strips extra path segments if the base URI already contained a database path.
+ */
+function repairMongoUri(uri: string): string {
+  if (!uri) return uri
+  const qIdx = uri.indexOf('?')
+  const hostPart = qIdx >= 0 ? uri.slice(0, qIdx) : uri
+  const queryPart = qIdx >= 0 ? uri.slice(qIdx) : ''
+
+  // Find where the authority ends (first '/' after the scheme's '//')
+  const schemeEnd = hostPart.indexOf('//') + 2
+  const pathStart = hostPart.indexOf('/', schemeEnd)
+  if (pathStart < 0) return uri  // no path — nothing to repair
+
+  const authority = hostPart.slice(0, pathStart)
+  // Strip all leading slashes from the path and collapse multiple segments
+  const rawPath = hostPart.slice(pathStart).replace(/^\/+/, '')
+  if (!rawPath) return uri  // path was just slashes — nothing to repair
+
+  // If there are multiple path segments, only the last is the db name
+  const dbName = rawPath.split('/').filter(Boolean).pop() || rawPath
+  const repaired = `${authority}/${dbName}${queryPart}`
+  return repaired
+}
+
 export async function connectTenantDB(uri: string): Promise<mongoose.Connection> {
+  // Repair double-slash URIs (e.g. mongodb://host//dbname → mongodb://host/dbname)
+  // that may have been produced by legacy buildUri logic before the fix.
+  const safeUri = repairMongoUri(uri)
+  if (safeUri !== uri) {
+    console.warn('[db-tenant] Repaired malformed URI:', uri.substring(0, 80), '->', safeUri.substring(0, 80))
+  }
+  uri = safeUri
+
   const startTime = Date.now()
   const pool = getPool()
   const promisePool = getPromisePool()

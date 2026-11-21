@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
           createdAt: (user as any).createdAt,
           branches,
           selectedBranch,
+          requiresBranchSetup: branches.length === 0,
         },
       })
     } else {

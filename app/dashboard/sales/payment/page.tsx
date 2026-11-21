@@ -108,6 +108,9 @@ function PaymentPageContent() {
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const [shopSettings, setShopSettings] = useState<any>(null)
   const [activeBranch, setActiveBranch] = useState<{ name: string; phone?: string; address?: string; email?: string } | null>(null)
+  // One-time key minted when the cart was submitted; sent with every POST so
+  // the backend can deduplicate retries caused by network errors or page refresh.
+  const [idempotencyKey, setIdempotencyKey] = useState<string>('')
   const [showCompletionDialog, setShowCompletionDialog] = useState(false)
 
   // Customer state
@@ -145,19 +148,23 @@ function PaymentPageContent() {
         if (data.saleEndpoint) setSaleEndpoint(data.saleEndpoint)
         if (data.returnUrl) setReturnUrl(data.returnUrl)
         if (data.saleType) setSaleType(data.saleType)
+        // Restore the idempotency key minted when the cashier hit "Complete Sale".
+        if (data.idempotencyKey) setIdempotencyKey(data.idempotencyKey)
         setLoading(false)
+        // Pass the branchId that was captured at cart-submission time so we
+        // always fetch the correct branch, not whatever the cookie says now.
+        fetchUserInfo(data.branchId || null)
       } catch {
         router.push('/dashboard/sales')
       }
     } else {
       router.push('/dashboard/sales')
     }
-    fetchUserInfo()
     fetchBankProviders()
     fetchCustomMethods()
   }, [router])
 
-  async function fetchUserInfo() {
+  async function fetchUserInfo(branchId: string | null = null) {
     try {
       const res = await fetch('/api/auth/me')
       if (res.ok) {
@@ -169,14 +176,17 @@ function PaymentPageContent() {
       const res = await fetch('/api/settings')
       if (res.ok) { const data = await res.json(); setShopSettings(data.settings) }
     } catch {}
-    // Fetch active branch for receipt contact info
-    try {
-      const branchId = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('selected_branch='))
-        ?.split('=')[1]
-      if (branchId) {
-        const res = await fetch(`/api/branches/${branchId}`)
+    // Use the branchId passed from the sales page (captured at cart-submission time).
+    // This avoids the race where a second tab has updated the selected_branch cookie
+    // to a different branch between the time the cashier hit "Complete Sale" and when
+    // the payment page mounts.
+    const resolvedBranchId = branchId || document.cookie
+      .split('; ')
+      .find(row => row.startsWith('selected_branch='))
+      ?.split('=')[1]
+    if (resolvedBranchId) {
+      try {
+        const res = await fetch(`/api/branches/${resolvedBranchId}`)
         if (res.ok) {
           const data = await res.json()
           const phones = (data.branch.phones || []).filter((p: string) => p.trim())
@@ -188,8 +198,8 @@ function PaymentPageContent() {
             email: emails.length > 0 ? emails.join(' / ') : '',
           })
         }
-      }
-    } catch {}
+      } catch {}
+    }
   }
 
   async function fetchBankProviders() {
@@ -663,11 +673,23 @@ function PaymentPageContent() {
       // fall through to addPendingSale + local stock deduction. On a server-side
       // rejection (response.ok === false, e.g. invalid deposit, insufficient stock)
       // we still surface the error — those are real business errors, not connectivity.
+
+      // Clear pendingSale BEFORE the network request so that a hard refresh
+      // during or after a successful POST cannot resubmit the same cart.
+      // The offline fallback re-queues via addPendingSale when needed.
+      sessionStorage.removeItem('pendingSale')
+
       let onlineSaleSucceeded = false
       try {
         const response = await fetch(saleEndpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            // Idempotency key minted once when the cashier hit "Complete Sale".
+            // The API uses this to detect and reject duplicate submissions that
+            // arrive from a network retry or a page refresh after a 500 error.
+            ...(idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {}),
+          },
           body: JSON.stringify(saleData),
         })
 
@@ -813,7 +835,7 @@ function PaymentPageContent() {
         try { await createBackupSnapshot(userInfo.shopName, userInfo.shopName, []) } catch {}
       }
 
-      sessionStorage.removeItem('pendingSale')
+      // pendingSale was already cleared before the fetch to prevent resubmission on refresh.
     } catch (error: any) {
       toast.error(error.message || 'Error processing payment')
     } finally {

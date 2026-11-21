@@ -3,6 +3,25 @@ import { connectTenantDB } from '@/lib/db-tenant'
 import { getModels } from '@/lib/tenant/get-models'
 
 /**
+ * Repairs double-slash URIs that may have been persisted from legacy buildUri logic.
+ * mongodb://host//dbname → mongodb://host/dbname
+ */
+function repairMongoUri(uri: string): string {
+  if (!uri) return uri
+  const qIdx = uri.indexOf('?')
+  const hostPart = qIdx >= 0 ? uri.slice(0, qIdx) : uri
+  const queryPart = qIdx >= 0 ? uri.slice(qIdx) : ''
+  const schemeEnd = hostPart.indexOf('//') + 2
+  const pathStart = hostPart.indexOf('/', schemeEnd)
+  if (pathStart < 0) return uri
+  const authority = hostPart.slice(0, pathStart)
+  const rawPath = hostPart.slice(pathStart).replace(/^\/+/, '')
+  if (!rawPath) return uri
+  const dbName = rawPath.split('/').filter(Boolean).pop() || rawPath
+  return `${authority}/${dbName}${queryPart}`
+}
+
+/**
  * Check if an email exists across all active tenants
  * Returns the tenant ID and user type if found, null otherwise
  */
@@ -19,6 +38,14 @@ export async function checkEmailExistsAcrossTenants(
 
   for (const tenant of tenants) {
     try {
+      // Repair any double-slash URIs persisted from legacy buildUri and patch DB in-place
+      const safeUri = repairMongoUri(tenant.mongoUri)
+      if (safeUri !== tenant.mongoUri) {
+        console.warn('[checkEmailExistsAcrossTenants] Repairing URI for tenant', tenant._id.toString())
+        Tenant.findByIdAndUpdate(tenant._id, { $set: { mongoUri: safeUri } }).exec().catch(() => {})
+        tenant.mongoUri = safeUri
+      }
+
       const conn = await connectTenantDB(tenant.mongoUri)
       const models = getModels(conn)
 

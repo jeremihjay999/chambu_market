@@ -4,9 +4,14 @@ import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
-async function generateOrderNumber(models: any, ownerId: string): Promise<string> {
-  const count = await models.Sale.countDocuments({ userId: ownerId })
-  return `ORD-${String(count + 1).padStart(5, '0')}`
+function generateOrderNumber(): string {
+  // Use four random hex chars as a suffix so concurrent requests for the same
+  // owner can never collide — no DB read required, no TOCTOU window.
+  // Format: ORD-<yyyyMMdd>-<4 hex chars>  e.g. ORD-20261120-3f9a
+  const now = new Date()
+  const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+  const randPart = crypto.randomUUID().replace(/-/g, '').slice(0, 6)
+  return `ORD-${datePart}-${randPart}`
 }
 
 export async function GET(request: NextRequest) {
@@ -156,7 +161,21 @@ export async function POST(request: NextRequest) {
     const branchContext = await getBranchContext(request)
 
     // Generate unique order number FIRST (needed for ledger entries)
-    const orderNumber = await generateOrderNumber(models, ownerId)
+    const orderNumber = generateOrderNumber()
+
+    // ── IDEMPOTENCY CHECK ─────────────────────────────────────────────────────
+    // The client sends a one-time UUID as X-Idempotency-Key when it submits a
+    // cart.  If we find an existing sale with that key we return the original
+    // result instead of creating a duplicate.  This covers network-retry and
+    // page-refresh scenarios where the first request succeeded but the client
+    // never received the 201 response.
+    const idempotencyKey = request.headers.get('X-Idempotency-Key')
+    if (idempotencyKey) {
+      const existing = await models.Sale.findOne({ userId: ownerId, idempotencyKey }).lean() as any
+      if (existing) {
+        return NextResponse.json({ sale: existing }, { status: 200 })
+      }
+    }
 
     // ── PAYMENT VALIDATION ────────────────────────────────────────────────────
     // Apply totalRounding setting before any comparison. 'ceil' rounds up to
@@ -493,6 +512,10 @@ export async function POST(request: NextRequest) {
       branchId: branchContext || null,
       staffId: payload.type === 'staff' ? payload.userId : null,
       orderNumber,
+      // Store the idempotency key so a repeated POST with the same key is
+      // caught by the dedup check at the top of this handler (and by the
+      // unique index on the Sale collection).
+      ...(idempotencyKey ? { idempotencyKey } : {}),
       customerId: customerId ? new Types.ObjectId(customerId) : null,
       customerName: customerName || data.customerName || '',
       items: data.items,

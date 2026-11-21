@@ -6,6 +6,31 @@ import { verifyAdminSession } from '../../../auth/route'
 import { checkEmailExistsAcrossTenants } from '@/lib/auth/check-email-exists'
 import { upsertEmailIndex } from '@/lib/email-index'
 
+/**
+ * Ensures the URI has exactly one database name segment after the authority.
+ * Fixes double-slash URIs like mongodb+srv://host//dbname → mongodb+srv://host/dbname
+ */
+function repairMongoUri(uri: string): string {
+  if (!uri) return uri
+  const qIdx = uri.indexOf('?')
+  const hostPart = qIdx >= 0 ? uri.slice(0, qIdx) : uri
+  const queryPart = qIdx >= 0 ? uri.slice(qIdx) : ''
+
+  const schemeEnd = hostPart.indexOf('//') + 2
+  const pathStart = hostPart.indexOf('/', schemeEnd)
+  if (pathStart < 0) return uri  // no path at all — nothing to repair
+
+  const authority = hostPart.slice(0, pathStart)
+  // Collect the path and collapse any double slashes, strip leading slash
+  const rawPath = hostPart.slice(pathStart).replace(/^\/+/, '')
+  // If path is empty after stripping, nothing to fix
+  if (!rawPath) return uri
+
+  // Keep only the last segment (the actual db name), drop any extra path components
+  const dbName = rawPath.split('/').filter(Boolean).pop() || rawPath
+  return `${authority}/${dbName}${queryPart}`
+}
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!await verifyAdminSession(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -32,7 +57,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     console.log('[provision] Connecting to tenant DB:', tenant.mongoUri)
-    const conn = await connectTenantDB(tenant.mongoUri)
+    const safeUri = repairMongoUri(tenant.mongoUri)
+    if (safeUri !== tenant.mongoUri) {
+      console.warn('[provision] Repaired malformed mongoUri:', tenant.mongoUri, '->', safeUri)
+      await Tenant.findByIdAndUpdate(id, { $set: { mongoUri: safeUri } })
+    }
+    const conn = await connectTenantDB(safeUri)
     const { User } = getModels(conn)
 
     const user = new User({

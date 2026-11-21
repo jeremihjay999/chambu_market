@@ -249,12 +249,26 @@ export const saleSchema = new mongoose.Schema(
     voidedAt:   { type: Date,   default: null },
     voidedBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', default: null },  // null = owner voided it
     voidReason: { type: String, default: '' },
+
+    // ── Idempotency ───────────────────────────────────────────────────────────
+    // UUID minted by the client when the cashier hits "Complete Sale".
+    // Stored here so the POST handler can detect and short-circuit duplicate
+    // submissions caused by network retries or page refreshes.
+    // Sparse so legacy sales without the field are not affected.
+    idempotencyKey: { type: String, default: null },
   },
   { collection: 'sales' }
 )
 saleSchema.index({ userId: 1, createdAt: -1 })
 saleSchema.index({ userId: 1, branchId: 1, createdAt: -1 })
-saleSchema.index({ userId: 1, orderNumber: 1 })
+// Unique per-owner order number — prevents duplicate order numbers from the
+// old count-then-generate race.  The orderNumber generator now uses a random
+// suffix so collisions are astronomically unlikely, but this is the safety net.
+saleSchema.index({ userId: 1, orderNumber: 1 }, { unique: true })
+// Sparse unique index on idempotencyKey: two POSTs with the same key for the
+// same owner will produce a duplicate-key error rather than a second sale.
+// Sparse so documents without the field (legacy sales) are excluded entirely.
+saleSchema.index({ userId: 1, idempotencyKey: 1 }, { unique: true, sparse: true })
 
 // ── Customer ──────────────────────────────────────────────────────────────────
 export const customerSchema = new mongoose.Schema(
