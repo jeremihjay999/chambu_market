@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Search, Plus, X, ChevronDown, ChevronUp, CreditCard, Mail, Phone, User, Calendar, MessageCircle, FileText, Edit2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
@@ -43,6 +44,7 @@ export default function CustomersPage() {
 }
 
 function CustomersContent() {
+  const router = useRouter()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
   const [isOffline, setIsOffline] = useState(false)
@@ -441,9 +443,13 @@ Thank you for choosing ${businessName}!`
               const hasDeposit  = (c.depositBalance || 0) > 0
               const isClear     = !hasCredit && !hasDeposit
               return (
-                <div key={c._id} className={`bg-white rounded-lg border overflow-hidden hover:shadow-sm transition-shadow ${
-                  hasCredit ? 'border-red-200' : hasDeposit ? 'border-teal-200' : 'border-gray-200'
-                }`}>
+                <div
+                  key={c._id}
+                  onClick={() => router.push(`/dashboard/customers/${c._id}`)}
+                  className={`bg-white rounded-lg border overflow-hidden hover:shadow-sm transition-shadow cursor-pointer ${
+                    hasCredit ? 'border-red-200' : hasDeposit ? 'border-teal-200' : 'border-gray-200'
+                  }`}
+                >
                   {/* Row */}
                   <div className="flex items-center gap-3 px-4 py-3">
                     {/* Avatar */}
@@ -498,7 +504,7 @@ Thank you for choosing ${businessName}!`
                           )}
                           {hasDeposit && (
                             <button
-                              onClick={() => { setDepositsCustomer(c); setShowDepositsDialog(true) }}
+                              onClick={(e) => { e.stopPropagation(); setDepositsCustomer(c); setShowDepositsDialog(true) }}
                               className="text-xs font-semibold text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-0.5 whitespace-nowrap hover:bg-teal-100 transition-colors"
                             >
                               +KES {c.depositBalance.toLocaleString()}
@@ -511,7 +517,7 @@ Thank you for choosing ${businessName}!`
                     {/* Actions */}
                     <div className="flex items-center gap-1 shrink-0">
                       <button
-                        onClick={() => openEditCustomer(c)}
+                        onClick={(e) => { e.stopPropagation(); openEditCustomer(c) }}
                         className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
                         title="Edit"
                       >
@@ -519,7 +525,7 @@ Thank you for choosing ${businessName}!`
                       </button>
                       {canTakeDeposits && (
                         <button
-                          onClick={() => { setDepositCustomer(c); setShowDeposit(true) }}
+                          onClick={(e) => { e.stopPropagation(); setDepositCustomer(c); setShowDeposit(true) }}
                           className="p-1.5 rounded hover:bg-teal-50 text-teal-500 hover:text-teal-700 transition-colors"
                           title="Take deposit"
                         >
@@ -528,14 +534,14 @@ Thank you for choosing ${businessName}!`
                       )}
                       {hasCredit ? (
                         <button
-                          onClick={() => { setPayCustomer(c); setPayAmount(String(c.creditBalance)) }}
+                          onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/customers/${c._id}?action=pay`) }}
                           className="px-2.5 py-1 text-xs font-semibold rounded bg-green-600 hover:bg-green-700 text-white transition-colors"
                         >
                           Pay
                         </button>
                       ) : (
                         <button
-                          onClick={() => shareInvoiceViaWhatsApp(c)}
+                          onClick={(e) => { e.stopPropagation(); shareInvoiceViaWhatsApp(c) }}
                           disabled={!c.phone}
                           className="p-1.5 rounded hover:bg-green-50 text-green-500 hover:text-green-700 transition-colors disabled:opacity-40"
                           title="WhatsApp"
@@ -544,7 +550,7 @@ Thank you for choosing ${businessName}!`
                         </button>
                       )}
                       <button
-                        onClick={() => setExpanded(expanded === c._id ? null : c._id)}
+                        onClick={(e) => { e.stopPropagation(); setExpanded(expanded === c._id ? null : c._id) }}
                         className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
                       >
                         {expanded === c._id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
