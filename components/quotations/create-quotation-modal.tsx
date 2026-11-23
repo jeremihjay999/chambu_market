@@ -28,6 +28,7 @@ import {
 import { Plus, Trash2, FileText, Check, ChevronsUpDown, Calendar } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { formatProductName } from '@/lib/format-product-name'
 import { Calendar as CalendarComponent } from '@/components/ui/calendar'
 import { format } from 'date-fns'
 
@@ -151,9 +152,6 @@ export function CreateQuotationModal({ open, onOpenChange, onSuccess }: CreateQu
     setItems(updated)
   }
 
-  function formatProductName(product: Product) {
-    return [product.variant, product.brand, product.productName].filter(Boolean).join(' ')
-  }
 
   function calculateSubtotal() {
     return items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0)

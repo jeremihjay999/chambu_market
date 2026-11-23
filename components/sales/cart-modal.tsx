@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Plus, Minus, X, ShoppingBag } from 'lucide-react'
+import { formatProductName } from '@/lib/format-product-name'
 
 interface CartItem {
   productId: string
@@ -47,10 +48,6 @@ export function CartModal({
   onPriceOverride,
 }: CartModalProps) {
   if (!isOpen) return null
-
-  function formatProductName(item: { productName: string; brand?: string; variant?: string }) {
-    return [item.variant, item.brand, item.productName].filter(Boolean).join(' ')
-  }
 
   const subtotal = cart.reduce(
     (sum, item) => sum + item.sellingPrice * item.quantity - item.discount,

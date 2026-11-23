@@ -41,6 +41,7 @@ import { HeldOrders } from '@/components/sales/held-orders'
 import { ProductImage } from '@/components/ui/product-image'
 import { LotPickerModal } from '@/components/sales/lot-picker-modal'
 import type { ScanResult } from '@/lib/barcode-scanner/types'
+import { formatProductName } from '@/lib/format-product-name'
 
 interface Product {
   _id: string
@@ -455,10 +456,6 @@ function SalesPageContent() {
     }
     
     setFilteredProducts(filtered)
-  }
-
-  function formatProductName(p: { productName: string; brand?: string; variant?: string }) {
-    return [p.variant, p.brand, p.productName].filter(Boolean).join(' ')
   }
 
   function addToCart(product: Product) {

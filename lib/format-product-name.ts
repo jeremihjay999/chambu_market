@@ -1,46 +1,40 @@
 /**
- * Standardized product name formatting utility
- * Format: Brand › Variant › Model › ProductName
- * Ensures consistency across all inventory modals and forms
+ * Smart product name formatter.
+ *
+ * Prepends brand and/or variant to productName only when they are not already
+ * present in the name, preventing strings like:
+ *   "256GB Black Samsung Samsung Galaxy S24 Ultra 256GB Black"
+ *
+ * Rules:
+ *  - Brand  (usually a single token): suppressed when it appears as a whole
+ *    word inside productName (case-insensitive).
+ *  - Variant (may be multi-word): suppressed when EVERY word in variant
+ *    already appears as a whole word inside productName. This avoids false
+ *    positives where e.g. "Pro" is a substring of "ProMax".
  */
-
-interface Product {
+export function formatProductName(p: {
   productName: string
   brand?: string
   variant?: string
-  model?: string
-  category?: string
-}
+}): string {
+  const name = p.productName ?? ''
 
-/**
- * Format product name with full details for user input forms
- * @param product - Product object with name, brand, variant, model
- * @returns Formatted string: "Brand › Variant › Model › ProductName"
- */
-export function formatProductName(product: Product): string {
-  const parts = [
-    product.brand,
-    product.variant,
-    product.model,
-    product.productName,
-  ].filter(Boolean)
-  
-  return parts.join(' › ')
-}
+  // Build a set of whole words that already exist in the product name.
+  const nameWords = new Set(
+    name.toLowerCase().match(/[a-z0-9]+/g) ?? []
+  )
 
-/**
- * Format product name with category prefix (legacy format)
- * @param product - Product object
- * @returns Formatted string: "Category › Brand › Variant › Model › ProductName"
- */
-export function formatProductNameWithCategory(product: Product): string {
-  const parts = [
-    product.category,
-    product.brand,
-    product.variant,
-    product.model,
-    product.productName,
-  ].filter(Boolean)
-  
-  return parts.join(' › ')
+  function alreadyContained(value: string | undefined): boolean {
+    if (!value) return true // absent → nothing to prepend
+    const tokens = value.toLowerCase().match(/[a-z0-9]+/g) ?? []
+    if (tokens.length === 0) return true
+    return tokens.every(tok => nameWords.has(tok))
+  }
+
+  const prefix: string[] = []
+
+  if (!alreadyContained(p.brand))   prefix.push(p.brand!)
+  if (!alreadyContained(p.variant)) prefix.push(p.variant!)
+
+  return prefix.length > 0 ? `${prefix.join(' ')} ${name}` : name
 }

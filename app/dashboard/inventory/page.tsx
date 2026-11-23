@@ -41,6 +41,7 @@ import { LotCreatorModal } from '@/components/inventory/lot-creator-modal'
 import { ProductImage } from '@/components/ui/product-image'
 import { useAuth } from '@/hooks/use-auth'
 import { formatCurrency } from '@/lib/currency'
+import { formatProductName } from '@/lib/format-product-name'
 
 interface Product {
   _id: string
@@ -220,11 +221,7 @@ function InventoryPageContent() {
 
     // Build product name from available parts — same logic as the sales page
     function formatName(p: Product): string {
-      return [
-        (p as any).variant,
-        (p as any).brand,
-        p.productName,
-      ].filter(Boolean).join(' ')
+      return formatProductName(p as any)
     }
 
     const rows = data.map((p, i) => `
@@ -563,7 +560,7 @@ function InventoryPageContent() {
 
                     {/* Product Info */}
                     <div className="flex-1 min-w-[200px]">
-                      <div className="font-semibold text-sm">{product.productName}</div>
+                      <div className="font-semibold text-sm">{formatProductName(product as any)}</div>
                       <div className="text-xs text-muted-foreground flex flex-wrap gap-1 mt-0.5">
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">{product.category}</span>
                         {(product as any).brand && <span>• {(product as any).brand}</span>}
@@ -1075,7 +1072,7 @@ function InventoryPageContent() {
                       </div>
                     ) : (
                       matched.map((p) => {
-                        const name = [(p as any).variant, (p as any).brand, p.productName].filter(Boolean).join(' ')
+                        const name = formatProductName(p as any)
                         const isSelected = exportSelected.has(p._id)
                         return (
                           <label

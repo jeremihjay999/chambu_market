@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Camera, CameraOff, SwitchCamera, X, Plus, Minus, ShoppingBag, Flashlight } from 'lucide-react'
+import { formatProductName } from '@/lib/format-product-name'
 
 const DEVICE_KEY = 'barcode_camera_deviceId'
 
@@ -194,9 +195,6 @@ export function IntegratedCameraScanner({
     setOpen(false)
   }
 
-  function formatProductName(item: { productName: string; brand?: string; variant?: string }) {
-    return [item.variant, item.brand, item.productName].filter(Boolean).join(' ')
-  }
 
   const subtotal = cart.reduce(
     (sum, item) => sum + item.sellingPrice * item.quantity - item.discount,
