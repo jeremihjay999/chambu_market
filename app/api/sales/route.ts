@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     const paymentStatusParam = url.searchParams.get('paymentStatus')
 
     const query: any = { userId: ownerId, voidedAt: null }
-    if (branchContext) {
+    if (branchContext && !url.searchParams.get('ignoreBranch')) {
       query.branchId = branchContext
     }
     

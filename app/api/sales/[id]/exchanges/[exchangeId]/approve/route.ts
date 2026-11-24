@@ -121,9 +121,18 @@ export async function PATCH(
         })
 
         if (branchContext) {
+          // Read-then-write so we can floor at 0 — raw $inc can produce negative
+          // inventory values when stock is already low or previous ops were lossy.
+          const inv = await models.ProductInventory.findOne({
+            userId: ownerId,
+            branchId: branchContext,
+            productId: productObjId,
+          })
+          const invPrev = inv?.stock ?? 0
+          const invNew = Math.max(0, invPrev - quantity)
           await models.ProductInventory.findOneAndUpdate(
             { userId: ownerId, branchId: branchContext, productId: productObjId },
-            { $inc: { stock: -quantity }, lastUpdated: new Date() }
+            { stock: invNew, lastUpdated: new Date() }
           )
         }
 

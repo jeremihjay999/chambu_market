@@ -157,6 +157,9 @@ export async function POST(
       })
     }
 
+    // Resolve branch context once — used for branch-aware stock checks below.
+    const branchContext = await getBranchContext(request)
+
     // ── Validate new items ────────────────────────────────────────────────────
     // Each new item must:
     //   1. Have a valid productId and quantity > 0
@@ -193,7 +196,20 @@ export async function POST(
         )
       }
 
-      const currentStock = product.stock || 0
+      // Use branch-level inventory when available — that is the number the UI
+      // displays, so the validation must check the same source.
+      let currentStock: number
+      if (branchContext) {
+        const inv = await models.ProductInventory.findOne({
+          userId: ownerId,
+          branchId: branchContext,
+          productId: productObjId,
+        }).lean() as any
+        currentStock = inv?.stock ?? 0
+      } else {
+        currentStock = product.stock || 0
+      }
+
       if (currentStock < ni.quantity) {
         return NextResponse.json(
           { error: `Insufficient stock for ${ni.productName}. Available: ${currentStock}` },
