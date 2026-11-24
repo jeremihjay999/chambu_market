@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Search, Plus, FileText, Eye, Printer, CheckCircle, XCircle, Clock, TrendingUp, DollarSign } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Search, Plus, FileText, Eye, Printer, CheckCircle, XCircle, Clock, TrendingUp, DollarSign, ShoppingCart } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,7 +16,6 @@ import {
 } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
-import { CreateQuotationModal } from '@/components/quotations/create-quotation-modal'
 import { QuotationPrintView } from '@/components/quotations/quotation-print-view'
 import {
   Dialog,
@@ -31,6 +31,9 @@ interface QuotationItem {
   quantity: number
   unitPrice: number
   lineTotal: number
+  discount?: number
+  checked?: boolean
+  removed?: boolean
 }
 
 interface Quotation {
@@ -64,7 +67,7 @@ function QuotationsContent() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [showCreateModal, setShowCreateModal] = useState(false)
+  const router = useRouter()
   const [selectedQuotation, setSelectedQuotation] = useState<Quotation | null>(null)
   const [showPrintView, setShowPrintView] = useState(false)
   const [showConvertDialog, setShowConvertDialog] = useState(false)
@@ -116,7 +119,7 @@ function QuotationsContent() {
   }
 
   function handleViewDetails(quotation: Quotation) {
-    setSelectedQuotation(quotation)
+    router.push(`/dashboard/quotations/${quotation._id}`)
   }
 
   async function handleStatusChange(quotationId: string, newStatus: string) {
@@ -162,15 +165,22 @@ function QuotationsContent() {
   }
 
   function handleAddToCart(quotation: Quotation) {
-    // Store quotation items in sessionStorage
-    const cartItems = quotation.items.map(item => ({
-      productId: item.productId,
-      productName: item.productName,
-      sellingPrice: item.unitPrice,
-      quantity: item.quantity,
-      discount: 0,
-    }))
-    
+    // Only push active (non-removed, non-checked) items into the POS cart.
+    const cartItems = quotation.items
+      .filter((item: any) => !item.removed && !item.checked)
+      .map(item => ({
+        productId: item.productId,
+        productName: item.productName,
+        sellingPrice: item.unitPrice,
+        quantity: item.quantity,
+        discount: item.discount || 0,
+      }))
+
+    if (cartItems.length === 0) {
+      toast.info('No unpaid items to push to cart')
+      return
+    }
+
     sessionStorage.setItem('quotationCart', JSON.stringify(cartItems))
     sessionStorage.setItem('quotationDiscount', String(quotation.discount))
     sessionStorage.setItem('quotationCustomer', JSON.stringify({
@@ -178,10 +188,8 @@ function QuotationsContent() {
       phone: quotation.customerPhone,
       email: quotation.customerEmail,
     }))
-    
+
     toast.success('Quotation items added to cart')
-    
-    // Navigate to sales page
     window.location.href = '/dashboard/sales?from=quotation'
   }
 
@@ -236,21 +244,22 @@ function QuotationsContent() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Quotations</h1>
-          <p className="text-muted-foreground">Create and manage customer quotations</p>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold truncate">Quotations</h1>
+          <p className="text-muted-foreground hidden sm:block">Create and manage customer quotations</p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)}>
+        <Button onClick={() => router.push('/dashboard/quotations/new')} className="shrink-0">
           <Plus className="mr-2 h-4 w-4" />
-          New Quotation
+          <span className="hidden sm:inline">New Quotation</span>
+          <span className="sm:hidden">New</span>
         </Button>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Quotations</CardTitle>
@@ -290,8 +299,8 @@ function QuotationsContent() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-4">
-        <div className="flex-1">
+      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
+        <div className="sm:flex-1">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -303,7 +312,7 @@ function QuotationsContent() {
           </div>
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[200px]">
+          <SelectTrigger className="w-full sm:w-[200px]">
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
           <SelectContent>
@@ -317,9 +326,9 @@ function QuotationsContent() {
         </Select>
       </div>
 
-      {/* Quotations Table */}
+      {/* Quotations list (cards) */}
       <Card>
-        <CardContent className="p-0">
+        <CardContent className="p-2 sm:p-3">
           {loading ? (
             <div className="p-8 text-center text-muted-foreground">Loading quotations...</div>
           ) : quotations.length === 0 ? (
@@ -327,84 +336,66 @@ function QuotationsContent() {
               No quotations found. Create your first quotation!
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="border-b bg-muted/50">
-                  <tr>
-                    <th className="text-left p-4 font-medium">Quotation #</th>
-                    <th className="text-left p-4 font-medium">Customer</th>
-                    <th className="text-left p-4 font-medium">Date</th>
-                    <th className="text-left p-4 font-medium">Valid Until</th>
-                    <th className="text-left p-4 font-medium">Items</th>
-                    <th className="text-right p-4 font-medium">Total</th>
-                    <th className="text-left p-4 font-medium">Status</th>
-                    <th className="text-right p-4 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {quotations.map((quotation) => (
-                    <tr key={quotation._id} className="hover:bg-muted/50">
-                      <td className="p-4 font-mono text-sm">{quotation.quotationNumber}</td>
-                      <td className="p-4">
-                        <div className="font-medium">{quotation.customerName}</div>
-                        {quotation.customerPhone && (
-                          <div className="text-sm text-muted-foreground">{quotation.customerPhone}</div>
-                        )}
-                      </td>
-                      <td className="p-4 text-sm">
-                        {new Date(quotation.createdAt).toLocaleDateString()}
-                      </td>
-                      <td className="p-4 text-sm">
-                        {new Date(quotation.validUntil).toLocaleDateString()}
-                      </td>
-                      <td className="p-4 text-sm">{quotation.items.length} items</td>
-                      <td className="p-4 text-right font-semibold">
-                        KSh {quotation.total.toLocaleString()}
-                      </td>
-                      <td className="p-4">{getStatusBadge(quotation.status)}</td>
-                      <td className="p-4">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleViewDetails(quotation)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handlePrint(quotation)}
-                          >
-                            <Printer className="h-4 w-4" />
-                          </Button>
-                          {quotation.status !== 'converted' && (
-                            <Button
-                              variant="default"
-                              size="sm"
-                              onClick={() => handleAddToCart(quotation)}
-                              disabled={quotation.status === 'expired'}
-                            >
-                              Add to Cart
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-2">
+              {quotations.map((quotation) => (
+                <div
+                  key={quotation._id}
+                  onClick={() => router.push(`/dashboard/quotations/${quotation._id}`)}
+                  className="border rounded-lg px-3 py-2.5 hover:bg-muted/50 transition-colors flex flex-wrap items-center gap-x-3 gap-y-1.5 cursor-pointer"
+                >
+                  <span className="font-mono text-sm font-semibold shrink-0">{quotation.quotationNumber}</span>
+                  {getStatusBadge(quotation.status)}
+                  <div className="min-w-[110px] flex-1">
+                    <div className="text-sm font-medium truncate">{quotation.customerName}</div>
+                    {quotation.customerPhone && (
+                      <div className="text-xs text-muted-foreground truncate">{quotation.customerPhone}</div>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground hidden lg:block w-24 shrink-0">
+                    {new Date(quotation.createdAt).toLocaleDateString()}
+                  </div>
+                  <div className="text-xs text-muted-foreground hidden lg:block w-28 shrink-0">
+                    valid {new Date(quotation.validUntil).toLocaleDateString()}
+                  </div>
+                  <div className="text-xs text-muted-foreground shrink-0">{quotation.items.length} items</div>
+                  <span className="font-semibold text-sm shrink-0">KSh {quotation.total.toLocaleString()}</span>
+                  <div className="flex items-center gap-1 ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => handleViewDetails(quotation)}
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => handlePrint(quotation)}
+                    >
+                      <Printer className="h-4 w-4" />
+                    </Button>
+                    {quotation.status !== 'converted' && (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="h-8"
+                        onClick={() => handleAddToCart(quotation)}
+                        disabled={quotation.status === 'expired'}
+                      >
+                        <ShoppingCart className="h-3.5 w-3.5 sm:mr-1.5" />
+                        <span className="hidden sm:inline">Add to Cart</span>
+                        <span className="sm:hidden">Cart</span>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </CardContent>
       </Card>
-
-      {/* Create Modal */}
-      <CreateQuotationModal
-        open={showCreateModal}
-        onOpenChange={setShowCreateModal}
-        onSuccess={loadQuotations}
-      />
 
       {/* Print View Dialog */}
       <Dialog open={showPrintView} onOpenChange={setShowPrintView}>

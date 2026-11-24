@@ -94,6 +94,8 @@ export async function PUT(
     if (validUntil !== undefined) quotation.validUntil = new Date(validUntil)
     if (notes !== undefined) quotation.notes = notes
     if (status !== undefined) quotation.status = status
+    // Mark the sent tick when the quote is sent (or re-sent).
+    if (status === 'sent' && !quotation.sentAt) quotation.sentAt = new Date()
 
     // Update items and recalculate totals if items provided
     if (items !== undefined && items.length > 0) {
@@ -102,10 +104,16 @@ export async function PUT(
         productName: item.productName,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        lineTotal: item.quantity * item.unitPrice,
+        discount: item.discount || 0,
+        lineTotal: item.quantity * item.unitPrice - (item.discount || 0),
+        checked: !!item.checked,
+        removed: !!item.removed,
       }))
 
-      quotation.subtotal = quotation.items.reduce((sum, item: any) => sum + item.lineTotal, 0)
+      // Totals exclude removed items (those struck-through, kept for record).
+      quotation.subtotal = quotation.items
+        .filter((item: any) => !item.removed)
+        .reduce((sum, item: any) => sum + item.lineTotal, 0)
       quotation.discount = discount !== undefined ? discount : quotation.discount
       quotation.total = quotation.subtotal - quotation.discount
     } else if (discount !== undefined) {

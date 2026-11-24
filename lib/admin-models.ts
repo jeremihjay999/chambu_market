@@ -55,6 +55,21 @@ const userEmailIndexSchema = new mongoose.Schema(
 userEmailIndexSchema.index({ email: 1, isActive: 1 })
 userEmailIndexSchema.index({ tenantId: 1 })
 
+// Quotation share registry — maps a public share token to the tenant DB that
+// holds the quotation. The public /q/[token] view uses this to resolve which
+// tenant connection to open (it has no auth/JWT to tell it).
+const quotationShareSchema = new mongoose.Schema(
+  {
+    shareToken:       { type: String, required: true, unique: true, index: true },
+    userId:           { type: String, required: true },        // owner id in the tenant DB
+    quotationId:      { type: String, required: true },        // quotation _id in the tenant DB
+    mongoUri:         { type: String, default: '' },           // '' = default MONGODB_URI DB
+    mongoUriFallback: { type: String, default: '' },
+    createdAt:        { type: Date, default: Date.now },
+  },
+  { collection: 'quotation_shares' }
+)
+
 export async function getAdminModels() {
   const conn = await connectAdminDB()
   // Always re-register to pick up schema changes (safe — Mongoose deduplicates internally
@@ -64,5 +79,6 @@ export async function getAdminModels() {
   const Tenant  = conn.model('Tenant',  tenantSchema)
   const Cluster = conn.model('Cluster', clusterSchema)
   const UserEmailIndex = conn.models.UserEmailIndex || conn.model('UserEmailIndex', userEmailIndexSchema)
-  return { Tenant, Cluster, UserEmailIndex }
+  const QuotationShare = conn.models.QuotationShare || conn.model('QuotationShare', quotationShareSchema)
+  return { Tenant, Cluster, UserEmailIndex, QuotationShare }
 }

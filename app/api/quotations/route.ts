@@ -51,7 +51,8 @@ export async function POST(request: NextRequest) {
       discount = 0,
       validUntil, 
       notes = '',
-      status = 'draft'
+      status = 'draft',
+      sendNow = false
     } = body
 
     // Validation
@@ -67,11 +68,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Valid until date is required' }, { status: 400 })
     }
 
-    // Calculate totals
-    const subtotal = items.reduce((sum: number, item: any) => {
-      return sum + (item.quantity * item.unitPrice)
-    }, 0)
-    
+    // Build items with per-line discount folded into lineTotal.
+    // subtotal = sum of lineTotals for ACTIVE (non-removed) items, matching the
+    // Sale schema's semantics so a pushed cart maps 1:1.
+    const quoteItems = items.map((item: any) => ({
+      productId: item.productId,
+      productName: item.productName,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      discount: item.discount || 0,
+      lineTotal: item.quantity * item.unitPrice - (item.discount || 0),
+      checked: !!item.checked,
+      removed: !!item.removed,
+    }))
+
+    const subtotal = quoteItems
+      .filter((item: any) => !item.removed)
+      .reduce((sum: number, item: any) => sum + item.lineTotal, 0)
     const total = subtotal - (discount || 0)
 
     // Generate quotation number
@@ -92,14 +105,9 @@ export async function POST(request: NextRequest) {
       customerName,
       customerPhone: customerPhone || '',
       customerEmail: customerEmail || '',
-      status,
-      items: items.map((item: any) => ({
-        productId: item.productId,
-        productName: item.productName,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        lineTotal: item.quantity * item.unitPrice,
-      })),
+      status: sendNow ? 'sent' : status,
+      sentAt: sendNow ? new Date() : null,
+      items: quoteItems,
       subtotal,
       discount: discount || 0,
       total,

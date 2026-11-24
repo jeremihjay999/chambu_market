@@ -9,6 +9,9 @@ interface QuotationItem {
   quantity: number
   unitPrice: number
   lineTotal: number
+  discount?: number
+  checked?: boolean
+  removed?: boolean
 }
 
 interface QuotationReceiptProps {
@@ -27,6 +30,8 @@ interface QuotationReceiptProps {
   subtotal: number
   discount: number
   total: number
+  paid?: number
+  remaining?: number
   notes?: string
   terms?: string
   mpesaPaybill?: string
@@ -58,6 +63,8 @@ export const QuotationReceipt = forwardRef<QuotationReceiptRef, QuotationReceipt
   subtotal,
   discount,
   total,
+  paid,
+  remaining,
   notes,
   terms,
   mpesaPaybill,
@@ -69,6 +76,9 @@ export const QuotationReceipt = forwardRef<QuotationReceiptRef, QuotationReceipt
   onPrintComplete,
 }, ref) => {
   const receiptRef = useRef<HTMLDivElement>(null)
+
+  // Whether any line carries a per-line discount — controls the Disc column.
+  const hasLineDiscounts = items.some(i => (i.discount || 0) > 0)
 
   // Build @page CSS based on paper size
   const pageCSS = paperSize === 'A4'
@@ -211,19 +221,40 @@ export const QuotationReceipt = forwardRef<QuotationReceiptRef, QuotationReceipt
             <th>Description</th>
             <th className="text-right">Qty</th>
             <th className="text-right">Unit Price</th>
+            {hasLineDiscounts && <th className="text-right">Disc</th>}
             <th className="text-right">Amount</th>
+            <th className="text-center">Status</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((item, index) => (
-            <tr key={index}>
-              <td className="text-center">{index + 1}</td>
-              <td>{item.productName}</td>
-              <td className="text-right">{item.quantity}</td>
-              <td className="text-right">KSh {item.unitPrice.toLocaleString()}</td>
-              <td className="text-right">KSh {item.lineTotal.toLocaleString()}</td>
-            </tr>
-          ))}
+          {items.map((item, index) => {
+            const isRemoved = !!item.removed
+            const isPaid = !isRemoved && !!item.checked
+            const struck = isRemoved || isPaid
+            return (
+              <tr key={index}>
+                <td className="text-center">{index + 1}</td>
+                <td style={{ textDecoration: struck ? 'line-through' : 'none', color: isRemoved ? '#888' : 'inherit' }}>
+                  {item.productName}{isRemoved ? ' (Removed)' : ''}
+                </td>
+                <td className="text-right">{item.quantity}</td>
+                <td className="text-right">KSh {item.unitPrice.toLocaleString()}</td>
+                {hasLineDiscounts && (
+                  <td className="text-right">
+                    {(item.discount || 0) > 0 ? `- KSh ${item.discount!.toLocaleString()}` : '-'}
+                  </td>
+                )}
+                <td className="text-right">KSh {item.lineTotal.toLocaleString()}</td>
+                <td className="text-center">
+                  {isRemoved
+                    ? <span style={{ color: '#b00' }}>Removed</span>
+                    : isPaid
+                    ? <span style={{ color: '#0a7d28' }}>✓ Paid</span>
+                    : <span style={{ color: '#888' }}>Unpaid</span>}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
 
@@ -243,6 +274,18 @@ export const QuotationReceipt = forwardRef<QuotationReceiptRef, QuotationReceipt
           <span>TOTAL:</span>
           <span>KSh {total.toLocaleString()}</span>
         </div>
+        {typeof paid === 'number' && (
+          <div className="totals-row" style={{ color: '#0a7d28' }}>
+            <span>Paid:</span>
+            <span>KSh {paid.toLocaleString()}</span>
+          </div>
+        )}
+        {typeof remaining === 'number' && (
+          <div className="totals-row" style={{ fontWeight: 'bold', color: remaining > 0 ? '#b00' : '#0a7d28' }}>
+            <span>{remaining > 0 ? 'Balance Remaining:' : 'Fully Paid'}</span>
+            <span>{remaining > 0 ? `KSh ${remaining.toLocaleString()}` : '✓'}</span>
+          </div>
+        )}
       </div>
 
       {/* Notes */}

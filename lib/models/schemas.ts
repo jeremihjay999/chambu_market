@@ -1114,7 +1114,15 @@ const quotationItemSchema = new mongoose.Schema(
     productName: { type: String, required: true },
     quantity:    { type: Number, required: true, min: 1 },
     unitPrice:   { type: Number, required: true, min: 0 },
+    // Per-line discount in KSh (absolute amount). Flows straight into the POS
+    // cart when the quotation is pushed to the register. Kept simple by design.
+    discount:    { type: Number, default: 0 },
     lineTotal:   { type: Number, required: true, min: 0 },
+    // Checklist state. `checked` = customer paid for this line (green tick).
+    // `removed` = dropped from the quote, kept for the record (struck-through,
+    // excluded from totals). Both toggled manually — no auto-tick.
+    checked:     { type: Boolean, default: false },
+    removed:     { type: Boolean, default: false },
   },
   { _id: false }
 )
@@ -1129,6 +1137,13 @@ export const quotationSchema = new mongoose.Schema(
     customerPhone: { type: String, default: '' },
     customerEmail: { type: String, default: '' },
     status:       { type: String, enum: ['draft', 'sent', 'accepted', 'expired', 'converted'], default: 'draft' },
+    // Sent tick — set when the quotation is sent to the customer (e.g. via
+    // WhatsApp). Replaces the status lifecycle for the "has it been sent?"
+    // question; the legacy status field is kept only for backward compat.
+    sentAt:       { type: Date, default: null },
+    // Unguessable token for the public /q/[token] share view. Generated on
+    // first share; null until then so unshared quotes are not publicly reachable.
+    shareToken:   { type: String, default: null },
     items:        { type: [quotationItemSchema], required: true },
     subtotal:     { type: Number, required: true, default: 0 },
     discount:     { type: Number, default: 0 },
@@ -1147,6 +1162,7 @@ quotationSchema.index({ userId: 1, createdAt: -1 })
 quotationSchema.index({ userId: 1, status: 1, createdAt: -1 })
 quotationSchema.index({ userId: 1, customerId: 1, createdAt: -1 })
 quotationSchema.index({ quotationNumber: 1 }, { unique: true })
+quotationSchema.index({ shareToken: 1 }, { unique: true, sparse: true })
 quotationSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
 
 // ── RestockPlan ────────────────────────────────────────────────────────────────
