@@ -77,10 +77,19 @@ export async function POST(request: NextRequest) {
     const { models } = await getTenantDB(request)
     const data = await request.json()
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-    const branchContext = await getBranchContext(request)
+    const { branchId, ...bodyData } = data
+
+    if (!branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 })
+    }
+
+    const branch = await models.Branch.findOne({ _id: branchId, userId: ownerId, status: 'active' })
+    if (!branch) {
+      return NextResponse.json({ error: 'Branch not found or inactive' }, { status: 404 })
+    }
 
     // Clean empty strings for ObjectId fields (convert to undefined)
-    const cleanedData = { ...data }
+    const cleanedData = { ...bodyData }
     if (cleanedData.supplierId === '') delete cleanedData.supplierId
     if (cleanedData.categoryId === '') delete cleanedData.categoryId
     if (cleanedData.branchId === '') delete cleanedData.branchId
@@ -127,18 +136,15 @@ export async function POST(request: NextRequest) {
     })
     await product.save()
 
-    // If creating from a branch context, also create ProductInventory record
-    if (branchContext) {
-      await models.ProductInventory.create({
-        userId: ownerId,
-        branchId: branchContext,
-        productId: product._id,
-        stock: cleanedData.stock || 0,
-        reserved: 0,
-        lastUpdated: new Date(),
-      })
-      console.log(`[products] Created ProductInventory for product ${product._id} in branch ${branchContext}`)
-    }
+    // Create ProductInventory record for the specified branch
+    await models.ProductInventory.create({
+      userId: ownerId,
+      branchId,
+      productId: product._id,
+      stock: cleanedData.stock || 0,
+      reserved: 0,
+      lastUpdated: new Date(),
+    })
 
     return NextResponse.json(product, { status: 201 })
   } catch (error) {

@@ -6,7 +6,6 @@
 
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
-import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -46,12 +45,12 @@ export async function POST(request: NextRequest) {
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { models } = await getTenantDB(request)
-    const ownerId     = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-    const branchContext = await getBranchContext(request)
-    const staffId     = payload.type === 'staff' ? payload.userId : null
+    const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const staffId = payload.type === 'staff' ? payload.userId : null
 
     const body = await request.json()
     const {
+      branchId,
       supplierId,
       reference,
       notes,
@@ -64,6 +63,36 @@ export async function POST(request: NextRequest) {
       customMethodName = '',
       paymentReference = '',
     } = body
+
+    // ── Validate branchId from body ───────────────────────────────────────────
+    if (!branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 })
+    }
+
+    // For staff: must match their assigned branch
+    if (payload.type === 'staff' && payload.branchId && payload.branchId !== branchId) {
+      return NextResponse.json({ error: 'You can only add stock to your assigned branch' }, { status: 403 })
+    }
+
+    // For branch managers: must be within their managed branches
+    if (payload.type === 'staff' && payload.isBranchManager && payload.managerOfBranches) {
+      const allowed = payload.managerOfBranches.some(
+        (bid: string) => bid === branchId || bid.toString() === branchId
+      )
+      if (!allowed) {
+        return NextResponse.json({ error: 'You do not manage this branch' }, { status: 403 })
+      }
+    }
+
+    // Verify branch exists, is active, and belongs to this owner
+    const branch = await models.Branch.findOne({
+      _id: branchId,
+      userId: ownerId,
+      status: 'active',
+    })
+    if (!branch) {
+      return NextResponse.json({ error: 'Branch not found or inactive' }, { status: 404 })
+    }
 
     // ── Validation ────────────────────────────────────────────────────────────
     if (!supplierId || !items || items.length === 0) {
@@ -114,10 +143,10 @@ export async function POST(request: NextRequest) {
         productUpdate.buyingPrice = item.unitCost
       }
 
-      if (branchContext) {
+      if (branchId) {
         const inventory = await models.ProductInventory.findOne({
           userId: ownerId,
-          branchId: branchContext,
+          branchId: branchId,
           productId: productObjId,
         })
 
@@ -128,7 +157,7 @@ export async function POST(request: NextRequest) {
         } else {
           await models.ProductInventory.create({
             userId:      ownerId,
-            branchId:    branchContext,
+            branchId:    branchId,
             productId:   productObjId,
             stock:       item.quantity,
             reserved:    0,
@@ -145,21 +174,6 @@ export async function POST(request: NextRequest) {
       const createdBatchIds: Types.ObjectId[] = []
 
       if (product.trackLots) {
-        let effectiveBranchId: string | null = branchContext
-
-        if (!effectiveBranchId) {
-          let defaultBranch = await models.Branch.findOne({ userId: ownerId, isDefault: true })
-          if (!defaultBranch) {
-            defaultBranch = await models.Branch.create({
-              userId:    ownerId,
-              name:      'Main Branch',
-              code:      'MAIN',
-              isDefault: true,
-            })
-          }
-          effectiveBranchId = defaultBranch._id.toString()
-        }
-
         const lotsToCreate: Array<{ label: string; quantity: number }> =
           item.lots && item.lots.length > 0
             ? item.lots
@@ -174,7 +188,7 @@ export async function POST(request: NextRequest) {
 
           const batch = await (models as any).ProductBatch.create({
             userId:          ownerId,
-            branchId:        new Types.ObjectId(effectiveBranchId),
+            branchId:        new Types.ObjectId(branchId),
             productId:       productObjId,
             lotId,
             lotLabel,
@@ -206,7 +220,7 @@ export async function POST(request: NextRequest) {
 
       await (models as any).StockLedger.create({
         userId:       ownerId,
-        branchId:     branchContext ? new Types.ObjectId(branchContext) : null,
+        branchId:     new Types.ObjectId(branchId),
         productId:    productObjId,
         staffId:      staffId ? new Types.ObjectId(staffId) : null,
         type:         'STOCK_IN',
@@ -267,7 +281,7 @@ export async function POST(request: NextRequest) {
 
     const receipt = await (models as any).StockReceipt.create({
       userId:          ownerId,
-      branchId:        branchContext ? new Types.ObjectId(branchContext) : null,
+      branchId:        new Types.ObjectId(branchId),
       receiptNumber,
       date:            new Date(),
       supplierId:      new Types.ObjectId(supplierId),

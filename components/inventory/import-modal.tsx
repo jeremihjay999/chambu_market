@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -60,6 +60,33 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
   const [importStats, setImportStats] = useState<any>(null)
   const [showConfirmation, setShowConfirmation] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Branch selection
+  const [branches, setBranches] = useState<{ _id: string; name: string; code: string }[]>([])
+  const [selectedBranchId, setSelectedBranchId] = useState('')
+
+  // Fetch branches when modal opens
+  useEffect(() => {
+    if (open) {
+      fetch('/api/branches?status=active')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data) return
+          const activeBranches = data.branches || []
+          setBranches(activeBranches)
+          const cookieBranchId = document.cookie
+            .split('; ')
+            .find(row => row.startsWith('selected_branch='))
+            ?.split('=')[1]
+          const matched = cookieBranchId && activeBranches.find((b: any) => b._id === cookieBranchId)
+          setSelectedBranchId(matched ? cookieBranchId : activeBranches[0]?._id || '')
+        })
+        .catch(() => {})
+    } else {
+      setSelectedBranchId('')
+      setBranches([])
+    }
+  }, [open])
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const selectedFile = e.target.files?.[0]
@@ -251,6 +278,11 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
       return
     }
 
+    if (!selectedBranchId) {
+      toast.error('Please select a branch')
+      return
+    }
+
     setShowConfirmation(false)
     setLoading(true)
     setStep('importing')
@@ -262,6 +294,7 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
         formData.append('file', file)
       }
       formData.append('mapping', JSON.stringify(mapping))
+      formData.append('branchId', selectedBranchId)
 
       // Simulate progress for better UX
       const progressInterval = setInterval(() => {
@@ -331,6 +364,27 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto">{/* Scrollable content wrapper */}
+
+        {/* Branch selector — persistent across all steps */}
+        <div className="px-1 pb-2">
+          <Label className="text-xs text-muted-foreground">Import to Branch</Label>
+          {branches.length <= 1 ? (
+            <div className="mt-1 flex items-center h-9 px-3 border rounded-md bg-muted text-sm font-medium text-muted-foreground">
+              {branches[0]?.name || 'No branch available'}
+            </div>
+          ) : (
+            <select
+              value={selectedBranchId}
+              onChange={e => setSelectedBranchId(e.target.value)}
+              className="mt-1 w-full h-9 px-3 border rounded-md text-sm bg-background"
+            >
+              <option value="">Select branch…</option>
+              {branches.map(b => (
+                <option key={b._id} value={b._id}>{b.name} ({b.code})</option>
+              ))}
+            </select>
+          )}
+        </div>
 
         {step === 'upload' && (
           <div className="space-y-4">

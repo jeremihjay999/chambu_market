@@ -64,6 +64,7 @@ interface CreateProductTransferModalProps {
 export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: CreateProductTransferModalProps) {
   const [branches, setBranches] = useState<Branch[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [fromBranchId, setFromBranchId] = useState('')
   const [toBranchId, setToBranchId] = useState('')
   const [items, setItems] = useState<TransferItem[]>([])
   const [notes, setNotes] = useState('')
@@ -83,7 +84,15 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
       const response = await fetch('/api/branches?status=active')
       if (response.ok) {
         const data = await response.json()
-        setBranches(data.branches || [])
+        const activeBranches: Branch[] = data.branches || []
+        setBranches(activeBranches)
+        // Pre-select source branch from cookie
+        const cookieBranchId = document.cookie
+          .split('; ')
+          .find(row => row.startsWith('selected_branch='))
+          ?.split('=')[1]
+        const matched = cookieBranchId && activeBranches.find(b => b._id === cookieBranchId)
+        setFromBranchId(matched ? cookieBranchId : activeBranches[0]?._id || '')
       }
     } catch (error) {
       console.error('Failed to fetch branches:', error)
@@ -231,6 +240,16 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
       return
     }
 
+    if (!fromBranchId) {
+      toast.error('Please select source branch')
+      return
+    }
+
+    if (fromBranchId === toBranchId) {
+      toast.error('Source and destination branch must be different')
+      return
+    }
+
     if (items.length === 0) {
       toast.error('Please add at least one item')
       return
@@ -265,6 +284,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          fromBranchId,
           toBranchId,
           items: items.map(item => ({
             productId:    item.productId,
@@ -290,6 +310,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
         onSuccess()
         onClose()
         // Reset form
+        setFromBranchId('')
         setToBranchId('')
         setItems([])
         setNotes('')
@@ -329,6 +350,29 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Source Branch */}
+          <div>
+            <Label>Source Branch</Label>
+            {branches.length <= 1 ? (
+              <div className="mt-1 flex items-center h-10 px-3 border rounded-md bg-muted text-sm font-medium text-muted-foreground">
+                {branches[0]?.name || 'No branch available'}
+              </div>
+            ) : (
+              <Select value={fromBranchId} onValueChange={setFromBranchId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select source branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map(branch => (
+                    <SelectItem key={branch._id} value={branch._id}>
+                      {branch.name} ({branch.code})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
           {/* Destination Branch */}
           <div>
             <Label>Destination Branch</Label>
@@ -337,7 +381,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
                 <SelectValue placeholder="Select branch" />
               </SelectTrigger>
               <SelectContent>
-                {branches.map(branch => (
+                {branches.filter(b => b._id !== fromBranchId).map(branch => (
                   <SelectItem key={branch._id} value={branch._id}>
                     {branch.name} ({branch.code})
                   </SelectItem>
@@ -557,7 +601,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={isSubmitting || items.length === 0 || !toBranchId}
+              disabled={isSubmitting || items.length === 0 || !toBranchId || !fromBranchId}
             >
               {isSubmitting ? 'Processing Stock Out...' : 'Stock Out'}
             </Button>

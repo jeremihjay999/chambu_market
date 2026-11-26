@@ -1,6 +1,5 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
-import { getBranchContext } from '@/lib/branch-context'
 import { canSeeBuyingPrice, buyingPriceForbidden } from '@/lib/buying-price'
 import { NextRequest, NextResponse } from 'next/server'
 import Papa from 'papaparse'
@@ -13,10 +12,21 @@ export async function POST(request: NextRequest) {
     if (!canSeeBuyingPrice(payload)) return buyingPriceForbidden()
 
     const { models } = await getTenantDB(request)
-    const branchId = await getBranchContext(request)
+    const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const formData = await request.formData()
     const file = formData.get('file') as File
     const mappingStr = formData.get('mapping') as string
+    const branchId = (formData.get('branchId') as string) || null
+
+    if (!branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 })
+    }
+
+    // Validate branch ownership
+    const branch = await models.Branch.findOne({ _id: branchId, userId: ownerId, status: 'active' })
+    if (!branch) {
+      return NextResponse.json({ error: 'Branch not found or inactive' }, { status: 404 })
+    }
 
     if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
 
@@ -50,7 +60,6 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const products = rows.map(row => {
       const p: Record<string, any> = { userId: ownerId }
       Object.entries(mapping).forEach(([col, field]) => {

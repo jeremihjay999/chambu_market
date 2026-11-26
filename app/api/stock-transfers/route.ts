@@ -62,17 +62,26 @@ export async function POST(request: NextRequest) {
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const body = await request.json()
-    const { toBranchId, items, notes } = body
+    const { fromBranchId, toBranchId, items, notes } = body
 
     // Validate required fields
-    if (!toBranchId || !items || items.length === 0) {
-      return NextResponse.json({ error: 'toBranchId and items are required' }, { status: 400 })
+    if (!fromBranchId || !toBranchId || !items || items.length === 0) {
+      return NextResponse.json({ error: 'fromBranchId, toBranchId and items are required' }, { status: 400 })
     }
 
-    // Get source branch (current context)
-    const fromBranchId = await getBranchContext(request)
-    if (!fromBranchId) {
-      return NextResponse.json({ error: 'Source branch context is required' }, { status: 400 })
+    // Staff: must be their assigned branch
+    if (payload.type === 'staff' && payload.branchId && payload.branchId !== fromBranchId) {
+      return NextResponse.json({ error: 'You can only transfer stock out from your assigned branch' }, { status: 403 })
+    }
+
+    // Branch managers: must be in their list
+    if (payload.type === 'staff' && payload.isBranchManager && payload.managerOfBranches) {
+      const allowed = payload.managerOfBranches.some(
+        (bid: string) => bid === fromBranchId || bid.toString() === fromBranchId
+      )
+      if (!allowed) {
+        return NextResponse.json({ error: 'You do not manage the source branch' }, { status: 403 })
+      }
     }
 
     // Validate branches exist AND are active

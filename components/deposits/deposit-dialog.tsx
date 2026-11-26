@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import { DepositReceipt } from './deposit-receipt'
+import { DepositReceipt, DepositReceiptRef } from './deposit-receipt'
 
 // ── Take Customer Deposit dialog ─────────────────────────────────────────────
 // Collects a customer prepayment (real cash by method) and prints a deposit
@@ -30,12 +30,14 @@ interface CreatedDeposit {
   mpesaCode?: string
   note?: string
   createdAt: string
+  cashierName?: string
   // Shop info — passed through to the printable receipt header
   shopName?: string
   shopLogo?: string
   shopPhone?: string
   shopEmail?: string
   shopAddress?: string
+  paperSize?: '58mm' | '80mm'
 }
 
 export function DepositDialog({
@@ -50,6 +52,8 @@ export function DepositDialog({
   shopPhone,
   shopEmail,
   shopAddress,
+  cashierName,
+  paperSize,
 }: {
   customer: DepositCustomer | null
   open: boolean
@@ -62,6 +66,8 @@ export function DepositDialog({
   shopPhone?: string
   shopEmail?: string
   shopAddress?: string
+  cashierName?: string
+  paperSize?: '58mm' | '80mm'
 }) {
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState<string>('cash')
@@ -75,6 +81,7 @@ export function DepositDialog({
 
   // The deposit that was just created — drives the receipt view/print step
   const [created, setCreated] = useState<CreatedDeposit | null>(null)
+  const receiptRef = useRef<DepositReceiptRef>(null)
 
   useEffect(() => {
     if (open) {
@@ -184,11 +191,13 @@ export function DepositDialog({
         mpesaCode: d.mpesaCode || '',
         note: d.note || '',
         createdAt: d.createdAt,
+        cashierName,
         shopName,
         shopLogo,
         shopPhone,
         shopEmail,
         shopAddress,
+        paperSize,
       })
       toast.success(`Deposit ${d.receiptNo} recorded`)
       onTaken?.()
@@ -221,7 +230,7 @@ export function DepositDialog({
             </div>
             <div className="flex gap-2 pt-1">
               <button
-                onClick={() => window.print()}
+                onClick={() => receiptRef.current?.print()}
                 className="flex-1 py-2 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold"
               >
                 Print Receipt
@@ -234,7 +243,7 @@ export function DepositDialog({
               </button>
             </div>
             {/* Printable receipt (hidden on screen, shown only for print) */}
-            <DepositReceipt deposit={created} />
+            <DepositReceipt ref={receiptRef} deposit={created} />
           </div>
         ) : (
           // ── Take deposit form ──────────────────────────────────────────────

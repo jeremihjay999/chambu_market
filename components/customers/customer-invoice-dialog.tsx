@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { FileText, Send, Loader2, Printer } from 'lucide-react'
 import { toast } from 'sonner'
+import { resolveMediaUrl } from '@/lib/media-url'
 
 interface Customer {
   _id: string
@@ -31,6 +32,7 @@ interface UnpaidSale {
     productName: string
     quantity: number
     price: number
+    discount?: number
   }>
 }
 
@@ -39,21 +41,44 @@ interface CustomerInvoiceDialogProps {
   onOpenChange: (open: boolean) => void
   customer: Customer | null
   shopName?: string
+  shopLogo?: string
+  shopPhone?: string
+  shopEmail?: string
+  shopAddress?: string
+  mpesaPaybill?: string
+  mpesaAccountNumber?: string
+  bankDetails?: string
+  issuedBy?: string
 }
 
 export function CustomerInvoiceDialog({
   open,
   onOpenChange,
   customer,
-  shopName = 'Our Shop'
+  shopName = 'Our Shop',
+  shopLogo,
+  shopPhone,
+  shopEmail,
+  shopAddress,
+  mpesaPaybill,
+  mpesaAccountNumber,
+  bankDetails,
+  issuedBy,
 }: CustomerInvoiceDialogProps) {
   const [loading, setLoading] = useState(false)
   const [unpaidSales, setUnpaidSales] = useState<UnpaidSale[]>([])
   const [sending, setSending] = useState(false)
   const [printing, setPrinting] = useState(false)
+  // Invoice number — minted fresh each time the dialog opens for a customer,
+  // so every printed copy of this statement carries its own reference.
+  const [invoiceNo, setInvoiceNo] = useState('')
 
   useEffect(() => {
     if (open && customer) {
+      const d = new Date()
+      const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+      const rand = Math.floor(1000 + Math.random() * 9000)
+      setInvoiceNo(`INV-${ymd}-${rand}`)
       fetchUnpaidSales()
     }
   }, [open, customer])
@@ -107,7 +132,7 @@ export function CustomerInvoiceDialog({
       )
       
       const salesResults = await Promise.all(salesPromises)
-      const sales = salesResults.filter(Boolean)
+      const sales = salesResults.filter(Boolean).map((r: any) => r.sale || r)
 
       // Map ledger amounts to sales for accurate debt display
       const salesWithLedgerDebt = sales.map((sale: any) => {
@@ -147,6 +172,10 @@ export function CustomerInvoiceDialog({
     return digits
   }
 
+  // Line total for an item: qty × price − per-line discount (if tracked)
+  const lineTotal = (item: { quantity: number; price: number; discount?: number }) =>
+    item.quantity * item.price - (item.discount || 0)
+
   function handleSendViaWhatsApp() {
     if (!customer || !customer.phone) {
       toast.error('Customer phone number is missing')
@@ -157,7 +186,8 @@ export function CustomerInvoiceDialog({
 
     // Build invoice message
     let message = `*PAYMENT REMINDER*\n`
-    message += `From: ${shopName}\n\n`
+    message += `From: ${shopName}\n`
+    message += `Invoice: ${invoiceNo}\n\n`
     message += `Dear ${customer.name},\n\n`
     message += `Outstanding Balance: *KES ${customer.creditBalance.toLocaleString()}*\n\n`
 
@@ -181,8 +211,14 @@ export function CustomerInvoiceDialog({
       message += `*Total Outstanding: KES ${customer.creditBalance.toLocaleString()}*\n\n`
     }
 
-    message += `Please settle your balance at your earliest convenience.\n\n`
-    message += `For payments or inquiries, contact us.\n\n`
+    // Payment details — so the customer can actually settle from this message
+    if (mpesaPaybill) {
+      message += `*How to Pay:*\n`
+      message += `M-PESA Paybill: ${mpesaPaybill}\n`
+      if (mpesaAccountNumber) message += `Account No: ${mpesaAccountNumber}\n`
+    }
+    if (shopPhone) message += `Call/WhatsApp: ${shopPhone}\n`
+    message += `\nPlease settle your balance at your earliest convenience.\n\n`
     message += `Thank you for your business!\n`
     message += `Powered by Chambu Digital`
 
@@ -203,11 +239,46 @@ export function CustomerInvoiceDialog({
 
     setPrinting(true)
 
+    // Per-order items rows — every item of every unpaid order, printed in full
+    const orderItemRows = (sale: UnpaidSale) => sale.items.map(item => `
+      <tr class="item-row">
+        <td style="padding-left: 24px;">&nbsp;&nbsp;${item.productName}</td>
+        <td>${item.quantity}</td>
+        <td>KES ${item.price.toLocaleString()}</td>
+        <td>KES ${lineTotal(item).toLocaleString()}</td>
+        <td colspan="2"></td>
+      </tr>
+    `).join('')
+
+    const logoTag = shopLogo
+      ? `<img src="${resolveMediaUrl(shopLogo)}" alt="${shopName}" style="height: 60px; margin: 0 auto 6px; display: block;" />`
+      : ''
+
+    const contactLines = [
+      shopPhone, shopEmail, shopAddress
+    ].filter(Boolean).map(l => `<div>${l}</div>`).join('')
+
+    const paymentInfo = (mpesaPaybill || bankDetails)
+      ? `
+        <h3>Payment Information</h3>
+        <div class="payment-block">
+          ${mpesaPaybill ? `<p><strong>M-PESA Paybill:</strong> ${mpesaPaybill}${mpesaAccountNumber ? ` &nbsp;|&nbsp; <strong>Account No:</strong> ${mpesaAccountNumber}` : ''}</p>` : ''}
+          ${bankDetails ? `<p style="white-space: pre-wrap;">${bankDetails}</p>` : ''}
+          ${shopPhone ? `<p><strong>Call/WhatsApp:</strong> ${shopPhone}</p>` : ''}
+        </div>
+      `
+      : (shopPhone ? `
+        <h3>Payment Information</h3>
+        <div class="payment-block">
+          <p><strong>Call/WhatsApp:</strong> ${shopPhone}</p>
+        </div>
+      ` : '')
+
     // Build HTML invoice
     const invoiceHTML = `
       <html>
         <head>
-          <title>Invoice - ${customer.name}</title>
+          <title>Invoice ${invoiceNo} - ${customer.name}</title>
           <style>
             @page { size: A4; margin: 20mm; }
             body {
@@ -233,6 +304,18 @@ export function CustomerInvoiceDialog({
               font-size: 20px;
               color: #666;
               margin-top: 5px;
+            }
+            .header .shop-contact {
+              font-size: 13px;
+              color: #888;
+              margin-top: 4px;
+            }
+            .invoice-meta {
+              display: flex;
+              justify-content: space-between;
+              font-size: 13px;
+              margin-bottom: 20px;
+              color: #555;
             }
             .customer-info {
               background: #f3f4f6;
@@ -278,13 +361,29 @@ export function CustomerInvoiceDialog({
               padding: 12px;
               border-bottom: 1px solid #e5e7eb;
             }
-            tr:hover {
-              background: #f9fafb;
+            tr.item-row td {
+              padding: 5px 12px;
+              font-size: 12px;
+              color: #555;
+              border-bottom: 1px dotted #eee;
             }
             .total-row {
               background: #f3f4f6;
               font-weight: bold;
               font-size: 18px;
+            }
+            .payment-block {
+              background: #eff6ff;
+              border: 1px solid #bfdbfe;
+              border-radius: 8px;
+              padding: 15px;
+              margin-bottom: 25px;
+              font-size: 14px;
+            }
+            .payment-block p { margin: 4px 0; }
+            h3 {
+              color: #1f2937;
+              margin-bottom: 10px;
             }
             .footer {
               text-align: center;
@@ -309,13 +408,25 @@ export function CustomerInvoiceDialog({
               background: #fef3c7;
               color: #92400e;
             }
+            .issued-by {
+              font-size: 12px;
+              color: #888;
+              margin-top: 6px;
+            }
           </style>
         </head>
         <body>
           <div class="header">
+            ${logoTag}
             <h1>PAYMENT INVOICE</h1>
             <div class="shop-name">${shopName}</div>
-            <div style="margin-top: 10px; font-size: 14px;">Date: ${new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+            ${contactLines ? `<div class="shop-contact">${contactLines}</div>` : ''}
+          </div>
+
+          <div class="invoice-meta">
+            <div><strong>Invoice No:</strong> ${invoiceNo}</div>
+            <div><strong>Date:</strong> ${new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+            ${issuedBy ? `<div><strong>Issued by:</strong> ${issuedBy}</div>` : ''}
           </div>
 
           <div class="customer-info">
@@ -337,21 +448,21 @@ export function CustomerInvoiceDialog({
             <table>
               <thead>
                 <tr>
-                  <th>Order No.</th>
-                  <th>Date</th>
-                  <th>Total</th>
-                  <th>Paid</th>
-                  <th>Balance</th>
+                  <th>Order No. / Items</th>
+                  <th>Qty</th>
+                  <th>Unit Price</th>
+                  <th>Line Total</th>
+                  <th>Order Balance</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 ${unpaidSales.map(sale => `
                   <tr>
-                    <td><strong>${sale.orderNumber}</strong></td>
-                    <td>${formatDate(sale.createdAt)}</td>
-                    <td>KES ${sale.total.toLocaleString()}</td>
-                    <td>KES ${(sale.total - sale.debt).toLocaleString()}</td>
+                    <td><strong>${sale.orderNumber}</strong><br><span style="font-size:11px;color:#888;">${formatDate(sale.createdAt)} · Order total KES ${sale.total.toLocaleString()}</span></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
                     <td><strong>KES ${sale.debt.toLocaleString()}</strong></td>
                     <td>
                       ${sale.total > sale.debt && sale.debt > 0 
@@ -359,18 +470,21 @@ export function CustomerInvoiceDialog({
                         : '<span class="status-badge status-unpaid">Unpaid</span>'}
                     </td>
                   </tr>
+                  ${orderItemRows(sale)}
                 `).join('')}
                 <tr class="total-row">
-                  <td colspan="4" style="text-align: right;">TOTAL DUE:</td>
-                  <td colspan="2"><strong>KES ${customer.creditBalance.toLocaleString()}</strong></td>
+                  <td colspan="3" style="text-align: right;">TOTAL DUE:</td>
+                  <td colspan="3"><strong>KES ${customer.creditBalance.toLocaleString()}</strong></td>
                 </tr>
               </tbody>
             </table>
           `}
 
+          ${paymentInfo}
+
           <div class="footer">
             <p>Please settle your balance at your earliest convenience.</p>
-            <p>For payments or inquiries, please contact us.</p>
+            ${shopPhone ? `<p>For payments or inquiries, contact us on ${shopPhone}.</p>` : ''}
             <p style="margin-top: 20px;">Thank you for your business!</p>
             <p style="margin-top: 10px; font-size: 12px;">Powered by Chambu Digital</p>
           </div>
@@ -409,6 +523,12 @@ export function CustomerInvoiceDialog({
         </DialogHeader>
 
         <div className="space-y-6">
+          {/* Invoice meta */}
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>Invoice No: <span className="font-semibold text-foreground">{invoiceNo}</span></span>
+            <span>{new Date().toLocaleDateString('en-GB')}</span>
+          </div>
+
           {/* Customer Info */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <div className="grid grid-cols-2 gap-3 text-sm">

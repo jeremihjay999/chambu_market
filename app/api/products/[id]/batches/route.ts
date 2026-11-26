@@ -11,7 +11,6 @@
 
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
-import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -89,7 +88,6 @@ export async function POST(
 
     const { models }    = await getTenantDB(request)
     const ownerId       = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-    const branchContext = await getBranchContext(request)
     const staffId       = payload.type === 'staff' ? payload.userId : null
 
     const product = await models.Product.findOne({ _id: id, userId: ownerId })
@@ -99,26 +97,26 @@ export async function POST(
     }
 
     const body = await request.json()
-    const { lots, buyingPrice, notes } = body as {
+    const { branchId, lots, buyingPrice, notes } = body as {
+      branchId?: string
       lots: Array<{ label: string; quantity: number }>
       buyingPrice?: number
       notes?: string
     }
 
-    if (!lots || lots.length === 0) {
-      return NextResponse.json({ error: 'At least one lot is required' }, { status: 400 })
+    if (!branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 })
     }
 
-    // Resolve effective branch
-    let effectiveBranchId: string | null = branchContext
-    if (!effectiveBranchId) {
-      let defaultBranch = await models.Branch.findOne({ userId: ownerId, isDefault: true })
-      if (!defaultBranch) {
-        defaultBranch = await models.Branch.create({
-          userId: ownerId, name: 'Main Branch', code: 'MAIN', isDefault: true,
-        })
-      }
-      effectiveBranchId = defaultBranch._id.toString()
+    const branch = await models.Branch.findOne({ _id: branchId, userId: ownerId, status: 'active' })
+    if (!branch) {
+      return NextResponse.json({ error: 'Branch not found or inactive' }, { status: 404 })
+    }
+
+    const effectiveBranchId = branchId
+
+    if (!lots || lots.length === 0) {
+      return NextResponse.json({ error: 'At least one lot is required' }, { status: 400 })
     }
 
     const createdBatches: any[] = []

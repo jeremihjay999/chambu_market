@@ -97,7 +97,6 @@ interface ProductCardState {
 interface BatchProductFormProps {
   onSuccess: () => void
 }
-
 export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
   const [products, setProducts] = useState<ProductCardState[]>([
     createEmptyProduct(),
@@ -111,10 +110,28 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
   const [quickAddSupplierId, setQuickAddSupplierId] = useState<string | null>(null)
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
+  const [branches, setBranches] = useState<{ _id: string; name: string; code: string }[]>([])
+  const [selectedBranchId, setSelectedBranchId] = useState('')
+
   useEffect(() => {
     fetchCategories()
     fetchSuppliers()
     fetchExistingProducts()
+    // Load branches and pre-select via cookie
+    fetch('/api/branches?status=active')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return
+        const activeBranches = data.branches || []
+        setBranches(activeBranches)
+        const cookieBranchId = document.cookie
+          .split('; ')
+          .find(row => row.startsWith('selected_branch='))
+          ?.split('=')[1]
+        const matched = cookieBranchId && activeBranches.find((b: any) => b._id === cookieBranchId)
+        setSelectedBranchId(matched ? cookieBranchId : activeBranches[0]?._id || '')
+      })
+      .catch(() => {})
   }, [])
 
   function createEmptyProduct(): ProductCardState {
@@ -413,6 +430,11 @@ async function submitBatch() {
       return
     }
 
+    if (!selectedBranchId) {
+      toast.error('Please select a branch')
+      return
+    }
+
     setLoading(true)
     const results = { success: 0, failed: 0, duplicates: [] as string[], errors: [] as any[] }
 
@@ -438,8 +460,9 @@ async function submitBatch() {
             const createData = {
               ...prodData,   // productName, category, supplierId, unit, lowStockThreshold, description, trackLots, lotUnit
               ...varData,    // brand, model, variant, stock, barcode, buyingPrice, sellingPrice, wholeSale, lotContainerName, lotSize, lotPrice
-              stock:  effectiveStock,
-              images: varImages,
+              stock:    effectiveStock,
+              images:   varImages,
+              branchId: selectedBranchId,
             }
 
             const response = await fetch('/api/products', {
@@ -476,6 +499,7 @@ async function submitBatch() {
                   method:  'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body:    JSON.stringify({
+                    branchId:    selectedBranchId,
                     lots:        validLots.map(l => ({ label: l.label || `Lot ${l.id}`, quantity: Number(l.quantity) })),
                     buyingPrice: variant.buyingPrice,
                     notes:       'Opening balance',
@@ -538,6 +562,27 @@ async function submitBatch() {
 
   return (
     <div className="space-y-2">
+      {/* Branch selector */}
+      <div className="pb-1">
+        <label className="text-xs font-medium text-muted-foreground">Create items in branch</label>
+        {branches.length <= 1 ? (
+          <div className="mt-1 flex items-center h-9 px-3 border rounded-md bg-muted text-sm font-medium text-muted-foreground">
+            {branches[0]?.name || 'No branch available'}
+          </div>
+        ) : (
+          <select
+            value={selectedBranchId}
+            onChange={e => setSelectedBranchId(e.target.value)}
+            className="mt-1 w-full h-9 px-3 border rounded-md text-sm bg-background"
+          >
+            <option value="">Select branch…</option>
+            {branches.map(b => (
+              <option key={b._id} value={b._id}>{b.name} ({b.code})</option>
+            ))}
+          </select>
+        )}
+      </div>
+
       {/* Product Cards */}
       <div className="space-y-2 max-h-[65vh] overflow-y-auto pr-2">
         {products.map((product, index) => (

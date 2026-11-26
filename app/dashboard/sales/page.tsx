@@ -1569,7 +1569,11 @@ function SalesPageContent() {
           creditCleared={lastSale.creditCleared}
           cashPaid={lastSale.cashPaid}
           debtCreated={lastSale.debtCreated}
+          depositBalance={lastSale.depositBalance}
+          depositDrawn={lastSale.depositDrawn}
           payments={lastSale.payments}
+          termsEnabled={shopSettings?.features?.termsEnabled}
+          termsText={shopSettings?.features?.termsText}
         />
       )}
 

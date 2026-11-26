@@ -382,6 +382,12 @@ function PharmacyPOSContent() {
           amountPaid: parseFloat(amountPaid),
           paymentMethod, customerName: customer?.name || 'Cash Sale',
           date: new Date(), receiptNumber: orderNumber,
+          // Credit / deposit fields from API response
+          customerBalance: result.customerBalance ?? undefined,
+          cashPaid: result.paymentBreakdown?.cashPaid ?? undefined,
+          debtCreated: result.paymentBreakdown?.debtCreated ?? undefined,
+          depositBalance: result.depositBalance ?? undefined,
+          depositDrawn: result.paymentBreakdown?.depositDrawn ?? undefined,
         })
 
         await addCachedSale({ _id: result.sale._id, userId: userInfo?.shopName || '', ...saleData, createdAt: new Date().toISOString(), synced: true })
@@ -403,7 +409,7 @@ function PharmacyPOSContent() {
 
         await addPendingSale({ ...saleData, _endpoint: '/api/pharmacy/sale' })
         setLastSale({
-          items: cart.map(i => ({ productName: i.productName, quantity: i.quantity, price: i.sellingPrice, discount: i.discount, total: i.sellingPrice * i.quantity - i.discount })),
+          items: cart.map(i => ({ productName: i.productName, brand: i.brand, quantity: i.quantity, price: i.sellingPrice, discount: i.discount, total: i.sellingPrice * i.quantity - i.discount })),
           subtotal, discount: cartDiscount, total: Math.max(0, total),
           paymentMethod, customerName: customer?.name || 'Cash Sale',
           date: new Date(), receiptNumber: `OFFLINE-${Date.now()}`,
@@ -887,6 +893,11 @@ function PharmacyPOSContent() {
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
           paperSize={shopSettings?.receipt?.paperSize || '58mm'}
+          customerBalance={lastSale.customerBalance}
+          cashPaid={lastSale.cashPaid}
+          debtCreated={lastSale.debtCreated}
+          termsEnabled={shopSettings?.features?.termsEnabled}
+          termsText={shopSettings?.features?.termsText}
         />
       )}
     </div>

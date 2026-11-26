@@ -29,6 +29,12 @@ import { useAuth } from '@/hooks/use-auth'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface Branch {
+  _id: string
+  name: string
+  code: string
+}
+
 interface ProductMeta {
   _id: string
   productName: string
@@ -92,8 +98,9 @@ interface StockCountModalProps {
 
 export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountModalProps) {
   const { user } = useAuth()
-  const branchId = user?.selectedBranch?._id ?? null
 
+  const [branches, setBranches]           = useState<Branch[]>([])
+  const [selectedBranchId, setSelectedBranchId] = useState('')
   const [products, setProducts]           = useState<ProductMeta[]>([])
   const [counts, setCounts]               = useState<CountItem[]>([])
   const [reason, setReason]               = useState('Weekly stock count')
@@ -105,23 +112,47 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
 
   useEffect(() => {
     if (open) {
-      fetchProducts()
+      fetchBranches()
     } else {
       setCounts([])
       setReason('Weekly stock count')
       setNotes('')
       setSearchQuery('')
       setSelectedCategory('all')
+      setSelectedBranchId('')
     }
   }, [open])
 
   // ── Data loading ───────────────────────────────────────────────────────────
 
-  async function fetchProducts() {
+  async function fetchBranches() {
+    try {
+      const res = await fetch('/api/branches?status=active')
+      if (!res.ok) return
+      const data = await res.json()
+      const activeBranches: Branch[] = data.branches || []
+      setBranches(activeBranches)
+      // Pre-select from cookie, fall back to first branch
+      const cookieBranchId = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('selected_branch='))
+        ?.split('=')[1]
+      const matched = cookieBranchId && activeBranches.find(b => b._id === cookieBranchId)
+      const preselected = matched ? cookieBranchId : activeBranches[0]?._id || ''
+      setSelectedBranchId(preselected)
+      // Fetch products once branch is known
+      fetchProducts(preselected)
+    } catch {
+      toast.error('Failed to load branches')
+    }
+  }
+
+  async function fetchProducts(branchId?: string) {
+    const bid = branchId ?? selectedBranchId
     try {
       setLoading(true)
       const headers: Record<string, string> = {}
-      if (branchId) headers['X-Branch-Context'] = branchId
+      if (bid) headers['X-Branch-Context'] = bid
       const res = await fetch('/api/products', { headers })
       if (!res.ok) throw new Error()
       const data = await res.json()
@@ -162,7 +193,7 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
     ))
     try {
       const params = new URLSearchParams({ status: 'active,depleted' })
-      if (branchId) params.set('branchId', branchId)
+      if (selectedBranchId) params.set('branchId', selectedBranchId)
       const res = await fetch(`/api/products/${productId}/batches?${params.toString()}`)
       if (!res.ok) throw new Error()
       const data = await res.json()
@@ -405,6 +436,11 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
       return
     }
 
+    if (!selectedBranchId) {
+      toast.error('Please select a branch')
+      return
+    }
+
     // Validate migration items
     for (const c of counts) {
       if (!c.migrationMode) continue
@@ -457,6 +493,7 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
       const countItems = counts.filter(c => !c.migrationMode && productDiff(c) !== 0)
       if (countItems.length > 0) {
         const payload = {
+          branchId: selectedBranchId,
           reason,
           notes,
           counts: countItems.map(c => {
@@ -558,6 +595,30 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
         ) : (
           <div className="flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
             <div className="space-y-4">
+
+              {/* Branch selector */}
+              <div>
+                <Label className="text-xs sm:text-sm">Branch *</Label>
+                {branches.length <= 1 ? (
+                  <div className="mt-1 flex items-center h-9 px-3 border rounded-md bg-muted text-sm font-medium text-muted-foreground">
+                    {branches[0]?.name || 'No branch available'}
+                  </div>
+                ) : (
+                  <select
+                    value={selectedBranchId}
+                    onChange={e => {
+                      setSelectedBranchId(e.target.value)
+                      fetchProducts(e.target.value)
+                    }}
+                    className="mt-1 w-full h-9 px-3 border rounded-md text-sm bg-background"
+                  >
+                    <option value="">Select branch…</option>
+                    {branches.map(b => (
+                      <option key={b._id} value={b._id}>{b.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
 
               {/* Summary cards */}
               <div className="grid grid-cols-3 gap-2 sm:gap-4">

@@ -859,6 +859,14 @@ Thank you for choosing ${businessName}!`
         onOpenChange={(open) => !open && setInvoiceCustomer(null)}
         customer={invoiceCustomer}
         shopName={shopSettings?.general?.shopName || 'Our Shop'}
+        shopLogo={shopSettings?.general?.logo}
+        shopPhone={shopSettings?.general?.phone}
+        shopEmail={shopSettings?.general?.email}
+        shopAddress={shopSettings?.general?.address}
+        mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
+        mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
+        bankDetails={shopSettings?.payment?.bankDetails}
+        issuedBy={currentUser?.name}
       />
 
       {/* Take Deposit Dialog */}
@@ -874,6 +882,8 @@ Thank you for choosing ${businessName}!`
         shopPhone={shopSettings?.general?.phone}
         shopEmail={shopSettings?.general?.email}
         shopAddress={shopSettings?.general?.address}
+        cashierName={currentUser?.name}
+        paperSize={shopSettings?.receipt?.paperSize || '58mm'}
       />
 
       {/* Customer Deposits management dialog (view + refund) */}

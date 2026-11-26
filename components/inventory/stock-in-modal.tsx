@@ -66,6 +66,13 @@ interface StockInItem {
   containerCount: number  // how many containers the user says they're receiving
 }
 
+interface Branch {
+  _id: string
+  name: string
+  code: string
+  status?: string
+}
+
 interface StockInModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -104,6 +111,10 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   const [submitting, setSubmitting]         = useState(false)
   const [loadingData, setLoadingData]       = useState(true)
 
+  // Branch selection — explicit, never inferred from cookie
+  const [branches, setBranches]             = useState<Branch[]>([])
+  const [selectedBranchId, setSelectedBranchId] = useState('')
+
   useEffect(() => {
     if (open) {
       fetchInitialData()
@@ -125,17 +136,19 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
       setPaymentReference('')
       setItems([{ productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [], containerCount: 0 }])
       setProductOpenStates({})
+      setSelectedBranchId('')
     }
   }, [open])
 
   async function fetchInitialData() {
     try {
       setLoadingData(true)
-      const [suppliersRes, productsRes, bankRes, customRes] = await Promise.all([
+      const [suppliersRes, productsRes, bankRes, customRes, branchesRes] = await Promise.all([
         fetch('/api/suppliers'),
         fetch('/api/products'),
         fetch('/api/bank-providers'),
         fetch('/api/payment-methods'),
+        fetch('/api/branches?status=active'),
       ])
       if (suppliersRes.ok) {
         const d = await suppliersRes.json()
@@ -152,6 +165,20 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
       if (customRes.ok) {
         const d = await customRes.json()
         setCustomMethods(d.methods || [])
+      }
+      if (branchesRes.ok) {
+        const d = await branchesRes.json()
+        const activeBranches: Branch[] = d.branches || []
+        setBranches(activeBranches)
+
+        // Pre-select: use the cookie value if present and valid, otherwise first branch
+        const cookieBranchId = document.cookie
+          .split('; ')
+          .find(row => row.startsWith('selected_branch='))
+          ?.split('=')[1]
+
+        const matchedCookie = cookieBranchId && activeBranches.find(b => b._id === cookieBranchId)
+        setSelectedBranchId(matchedCookie ? cookieBranchId : activeBranches[0]?._id || '')
       }
     } catch (error) {
       toast.error('Failed to load data')
@@ -340,6 +367,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
 
   async function handleSubmit() {
     if (!supplierId) { toast.error('Please select a supplier'); return }
+    if (!selectedBranchId) { toast.error('Please select a branch'); return }
 
     const validItems = items.filter(item => item.productId && item.quantity > 0 && item.unitCost > 0)
     if (validItems.length === 0) { toast.error('Please add at least one valid item'); return }
@@ -362,6 +390,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
         : ''
 
       const payload = {
+        branchId: selectedBranchId,
         supplierId,
         reference,
         notes,
@@ -431,6 +460,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
         headers: { 'Content-Type': 'application/json' },
         body:    linkedAdvanceId
           ? JSON.stringify({
+              branchId: selectedBranchId,
               items: validItems.map(item => ({
                 productId: item.productId,
                 quantity:  item.quantity,
@@ -498,6 +528,27 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
           <div className="text-center py-8">Loading...</div>
         ) : (
           <div className="space-y-6">
+
+            {/* Branch */}
+            <div>
+              <Label>Branch *</Label>
+              {branches.length <= 1 ? (
+                <div className="mt-1 flex items-center h-10 px-3 border rounded-md bg-muted text-sm font-medium text-muted-foreground">
+                  {branches[0]?.name || 'No branch available'}
+                </div>
+              ) : (
+                <select
+                  value={selectedBranchId}
+                  onChange={e => setSelectedBranchId(e.target.value)}
+                  className="mt-1 w-full h-10 px-3 border rounded-md text-sm bg-background"
+                >
+                  <option value="">Select branch…</option>
+                  {branches.map(b => (
+                    <option key={b._id} value={b._id}>{b.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
 
             {/* Supplier */}
             <div>

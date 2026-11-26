@@ -21,7 +21,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
-import { getBranchContext } from '@/lib/branch-context'
 import { Types } from 'mongoose'
 
 function generateReceiptNumber(lastNumber: string | null): string {
@@ -48,7 +47,6 @@ export async function POST(
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const staffId = payload.type === 'staff' ? payload.userId : null
-    const branchContext = await getBranchContext(request)
     const params = await context.params
     const { id } = params
 
@@ -74,6 +72,7 @@ export async function POST(
 
     const body = await request.json()
     const {
+      branchId,
       items,
       notes,
       varianceAction = 'none',
@@ -84,6 +83,33 @@ export async function POST(
       varianceCustomMethodName,
       variancePaymentReference,
     } = body
+
+    // ── Validate branchId from body ───────────────────────────────────────────
+    if (!branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 })
+    }
+
+    if (payload.type === 'staff' && payload.branchId && payload.branchId !== branchId) {
+      return NextResponse.json({ error: 'You can only add stock to your assigned branch' }, { status: 403 })
+    }
+
+    if (payload.type === 'staff' && payload.isBranchManager && payload.managerOfBranches) {
+      const allowed = payload.managerOfBranches.some(
+        (bid: string) => bid === branchId || bid.toString() === branchId
+      )
+      if (!allowed) {
+        return NextResponse.json({ error: 'You do not manage this branch' }, { status: 403 })
+      }
+    }
+
+    const branch = await models.Branch.findOne({
+      _id: branchId,
+      userId: ownerId,
+      status: 'active',
+    })
+    if (!branch) {
+      return NextResponse.json({ error: 'Branch not found or inactive' }, { status: 404 })
+    }
 
     if (!items || items.length === 0) {
       return NextResponse.json({ error: 'At least one item is required' }, { status: 400 })
@@ -114,10 +140,10 @@ export async function POST(
       const productUpdate: any = { stock: newStock, updatedAt: new Date() }
       if (item.unitCost > 0) productUpdate.buyingPrice = item.unitCost
 
-      if (branchContext) {
+      if (branchId) {
         const inventory = await models.ProductInventory.findOne({
           userId: ownerId,
-          branchId: branchContext,
+          branchId: branchId,
           productId: productObjId,
         })
         if (inventory) {
@@ -127,7 +153,7 @@ export async function POST(
         } else {
           await models.ProductInventory.create({
             userId: ownerId,
-            branchId: branchContext,
+            branchId: branchId,
             productId: productObjId,
             stock: item.quantity,
             reserved: 0,
@@ -139,7 +165,7 @@ export async function POST(
 
       await (models as any).StockLedger.create({
         userId:       ownerId,
-        branchId:     branchContext ? new Types.ObjectId(branchContext) : null,
+        branchId:     new Types.ObjectId(branchId),
         productId:    productObjId,
         staffId:      staffId ? new Types.ObjectId(staffId) : null,
         type:         'STOCK_IN',
@@ -198,7 +224,7 @@ export async function POST(
         // pay_now  → new paid receipt for the shortfall (paid with given method)
         await (models as any).StockReceipt.create({
           userId:           ownerId,
-          branchId:         branchContext ? new Types.ObjectId(branchContext) : null,
+          branchId:         new Types.ObjectId(branchId),
           receiptNumber:    newReceiptNumber,
           date:             new Date(),
           supplierId:       receipt.supplierId || null,
@@ -232,7 +258,7 @@ export async function POST(
         if (varianceAction === 'refund') {
           await (models as any).StockReceipt.create({
             userId:           ownerId,
-            branchId:         branchContext ? new Types.ObjectId(branchContext) : null,
+            branchId:         new Types.ObjectId(branchId),
             receiptNumber:    newReceiptNumber,
             date:             new Date(),
             supplierId:       receipt.supplierId || null,

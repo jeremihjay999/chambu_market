@@ -25,7 +25,6 @@
 
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
-import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -48,11 +47,32 @@ export async function POST(request: NextRequest) {
 
     const { models } = await getTenantDB(request)
     const ownerId       = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-    const branchContext = await getBranchContext(request)
     const staffId       = payload.type === 'staff' ? payload.userId : null
 
     const body = await request.json()
-    const { counts, reason, notes } = body
+    const { counts, reason, notes, branchId } = body
+
+    if (!branchId) {
+      return NextResponse.json({ error: 'branchId is required' }, { status: 400 })
+    }
+
+    if (payload.type === 'staff' && payload.branchId && payload.branchId !== branchId) {
+      return NextResponse.json({ error: 'You can only count stock in your assigned branch' }, { status: 403 })
+    }
+
+    if (payload.type === 'staff' && payload.isBranchManager && payload.managerOfBranches) {
+      const allowed = payload.managerOfBranches.some(
+        (bid: string) => bid === branchId || bid.toString() === branchId
+      )
+      if (!allowed) {
+        return NextResponse.json({ error: 'You do not manage this branch' }, { status: 403 })
+      }
+    }
+
+    const branch = await models.Branch.findOne({ _id: branchId, userId: ownerId, status: 'active' })
+    if (!branch) {
+      return NextResponse.json({ error: 'Branch not found or inactive' }, { status: 404 })
+    }
 
     if (!counts || counts.length === 0) {
       return NextResponse.json(
@@ -98,7 +118,7 @@ export async function POST(request: NextRequest) {
           // Write a ledger entry per batch so history is traceable
           await (models as any).StockLedger.create({
             userId:        ownerId,
-            branchId:      branchContext ? new Types.ObjectId(branchContext) : null,
+            branchId:      new Types.ObjectId(branchId),
             productId:     productObjId,
             staffId:       staffId ? new Types.ObjectId(staffId) : null,
             batchId:       batch._id,
@@ -128,7 +148,7 @@ export async function POST(request: NextRequest) {
           userId:    ownerId,
           productId: productObjId,
           status:    'active',
-          ...(branchContext ? { branchId: new Types.ObjectId(branchContext) } : {}),
+          ...(branchId ? { branchId: new Types.ObjectId(branchId) } : {}),
         }).lean()
 
         const recomputedStock = activeBatches.reduce(
@@ -136,13 +156,11 @@ export async function POST(request: NextRequest) {
         )
 
         // Update branch inventory + legacy field with the recomputed total
-        if (branchContext) {
-          await models.ProductInventory.findOneAndUpdate(
-            { userId: ownerId, branchId: branchContext, productId: productObjId },
-            { stock: recomputedStock, lastUpdated: new Date() },
-            { upsert: true }
-          )
-        }
+        await models.ProductInventory.findOneAndUpdate(
+          { userId: ownerId, branchId, productId: productObjId },
+          { stock: recomputedStock, lastUpdated: new Date() },
+          { upsert: true }
+        )
         await models.Product.findByIdAndUpdate(productObjId, {
           stock:     recomputedStock,
           updatedAt: new Date(),
@@ -167,10 +185,9 @@ export async function POST(request: NextRequest) {
 
       totalDifference += Math.abs(difference)
 
-      if (branchContext) {
-        const inventory = await models.ProductInventory.findOne({
+      const inventory = await models.ProductInventory.findOne({
           userId:    ownerId,
-          branchId:  branchContext,
+          branchId,
           productId: productObjId,
         })
 
@@ -181,7 +198,7 @@ export async function POST(request: NextRequest) {
         } else {
           await models.ProductInventory.create({
             userId:      ownerId,
-            branchId:    branchContext,
+            branchId,
             productId:   productObjId,
             stock:       count.physicalStock,
             lastUpdated: new Date(),
@@ -191,16 +208,10 @@ export async function POST(request: NextRequest) {
           stock:     count.physicalStock,
           updatedAt: new Date(),
         })
-      } else {
-        await models.Product.findByIdAndUpdate(productObjId, {
-          stock:     count.physicalStock,
-          updatedAt: new Date(),
-        })
-      }
 
       await (models as any).StockLedger.create({
         userId:        ownerId,
-        branchId:      branchContext ? new Types.ObjectId(branchContext) : null,
+        branchId:      new Types.ObjectId(branchId),
         productId:     productObjId,
         staffId:       staffId ? new Types.ObjectId(staffId) : null,
         type:          'ADJUSTMENT',
