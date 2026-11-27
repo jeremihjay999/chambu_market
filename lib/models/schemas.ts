@@ -1554,7 +1554,7 @@ paymentMethodSchema.index({ userId: 1, isActive: 1 })
 // One pickup drawing down a deposit. Append-only; never edited.
 const depositConsumptionSchema = new mongoose.Schema(
   {
-    saleId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Sale', required: true },
+    saleId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Sale', required: false },
     orderNumber:{ type: String, default: '' },          // denormalized for receipts/reports
     amount:     { type: Number, required: true, min: 0 },
     date:       { type: Date, default: Date.now },

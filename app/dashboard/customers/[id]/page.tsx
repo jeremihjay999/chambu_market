@@ -89,6 +89,8 @@ interface ActiveDeposit {
   method: string
   createdAt: string
   note?: string
+  consumptions?: Array<{ amount: number; date?: string; note?: string }>
+  refunds?: Array<{ amount: number; date?: string }>
 }
 
 // Allocation row in the payment / attach dialog
@@ -98,6 +100,19 @@ interface AllocRow {
   orderDate: string
   currentDebt: number
   amount: string
+}
+
+// One payment instrument entry in the multi-method payment dialog
+interface PayEntry {
+  id: string
+  method: string       // cash | mobile_money | card | bank | custom:<id>
+  amount: string
+  mpesaCode: string
+  mpesaPhone: string
+  bankId: string
+  bankName: string
+  customMethodId: string
+  customMethodName: string
 }
 
 type PageTab      = 'orders' | 'unallocated' | 'deposits'
@@ -265,15 +280,20 @@ function CustomerDetailContent() {
 
   // ── Payment dialog ────────────────────────────────────────────────────────
   const [showPay, setShowPay]           = useState(false)
-  const [payMethod, setPayMethod]       = useState('cash')
-  const [payMpesaCode, setPayMpesaCode] = useState('')
-  const [payMpesaPhone, setPayMpesaPhone] = useState('')
-  const [payBankId, setPayBankId]       = useState('')
+  const [paymentEntries, setPaymentEntries] = useState<PayEntry[]>([])
   const [payNote, setPayNote]           = useState('')
-  const [payReceived, setPayReceived]   = useState('')     // cash amount entered
-  const [depositUseAmt, setDepositUseAmt] = useState('')  // store credit to apply
   const [allocRows, setAllocRows]       = useState<AllocRow[]>([])
   const [paying, setPaying]             = useState(false)
+
+  function makePayEntry(method = 'cash', amount = ''): PayEntry {
+    return { id: String(Date.now() + Math.random()), method, amount, mpesaCode: '', mpesaPhone: '', bankId: '', bankName: '', customMethodId: '', customMethodName: '' }
+  }
+  function updatePayEntry(id: string, patch: Partial<PayEntry>) {
+    setPaymentEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e))
+  }
+  function removePayEntry(id: string) {
+    setPaymentEntries(prev => prev.filter(e => e.id !== id))
+  }
 
   // ── Edit dialog ───────────────────────────────────────────────────────────
   const [showEdit, setShowEdit]               = useState(false)
@@ -311,7 +331,7 @@ function CustomerDetailContent() {
       const [custRes, salesRes, depositsRes] = await Promise.all([
         fetch(`/api/customers/${id}`),
         fetch(`/api/sales?customerId=${id}&ignoreBranch=true`),
-        fetch(`/api/customers/${id}/deposits`),
+        fetch(`/api/customers/${id}/deposits?all=true`),
       ])
       if (!custRes.ok) {
         if (custRes.status === 404) { toast.error('Customer not found'); router.push('/dashboard/customers'); return }
@@ -354,7 +374,7 @@ function CustomerDetailContent() {
 
   // ── Derived: tab badge counts ─────────────────────────────────────────────
   const unallocatedCount = unallocatedPayments.length
-  const depositsCount    = activeDeposits.length
+  const depositsCount    = activeDeposits.filter(d => d.status === 'active' || d.status === 'partial').length
 
   // ── Payment dialog — open ─────────────────────────────────────────────────
   function openPay() {
@@ -371,11 +391,17 @@ function CustomerDetailContent() {
       amount:      '',
     })))
 
-    setPayMethod('cash')
-    setPayMpesaCode(''); setPayMpesaPhone(''); setPayBankId('')
+    const totalDebt = unsettled.reduce((s, r) => s + r.currentDebt, 0)
+    const hasDeposit = (customer.depositBalance || 0) > 0
+
+    if (hasDeposit) {
+      // Pre-fill a store credit entry capped at total outstanding debt
+      const creditAmt = Math.min(customer.depositBalance, totalDebt)
+      setPaymentEntries([makePayEntry('store_credit', String(creditAmt))])
+    } else {
+      setPaymentEntries([makePayEntry('cash')])
+    }
     setPayNote('')
-    setPayReceived('')
-    setDepositUseAmt('')
     setShowPay(true)
   }
 
@@ -384,14 +410,29 @@ function CustomerDetailContent() {
     () => allocRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
     [allocRows]
   )
-  const payReceivedNum   = parseFloat(payReceived) || 0
-  const depositUseNum    = parseFloat(depositUseAmt) || 0
-  const totalIncoming    = payReceivedNum + depositUseNum
+  // Split payment entries into real-money vs store-credit
+  const realPaymentEntries = useMemo(
+    () => paymentEntries.filter(e => e.method !== 'store_credit'),
+    [paymentEntries]
+  )
+  const storeCreditEntries = useMemo(
+    () => paymentEntries.filter(e => e.method === 'store_credit'),
+    [paymentEntries]
+  )
+  const totalPaymentsNum   = useMemo(
+    () => realPaymentEntries.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0),
+    [realPaymentEntries]
+  )
+  const depositUseNum = useMemo(
+    () => storeCreditEntries.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0),
+    [storeCreditEntries]
+  )
+  const totalIncoming    = totalPaymentsNum + depositUseNum
   const totalAllocated   = cashAllocTotal
   const unallocatedNum   = Math.round((totalIncoming - totalAllocated) * 100) / 100
   const isExcess         = unallocatedNum > 0.01
   const isUnder          = unallocatedNum < -0.01
-  const availableDeposit = activeDeposits.reduce((s, d) => s + (d.balance || 0), 0)
+  const availableDeposit = activeDeposits.filter(d => d.status === 'active' || d.status === 'partial').reduce((s, d) => s + (d.balance || 0), 0)
 
   const canSubmitPay = totalIncoming > 0 &&
     !isUnder &&
@@ -404,64 +445,76 @@ function CustomerDetailContent() {
   // ── Payment dialog — submit ───────────────────────────────────────────────
   async function recordPayment() {
     if (!customer) return
-    if (payReceivedNum <= 0 && depositUseNum <= 0) { toast.error('Enter amount received or store credit to use'); return }
-    if (payReceivedNum > 0 && !payMethod) { toast.error('Select a payment method'); return }
-    if (payMethod === 'bank' && !payBankId) { toast.error('Select a bank provider'); return }
-    if (isUnder) { toast.error('Over-allocated — reduce amounts'); return }
+    if (totalPaymentsNum <= 0 && depositUseNum <= 0) { toast.error('Enter at least one payment amount'); return }
+    if (isUnder) { toast.error('Over-allocated — reduce amounts or add more payment'); return }
     if (!allocRows.some(r => (parseFloat(r.amount) || 0) > 0)) { toast.error('Allocate to at least one order'); return }
 
-    const isCustom        = payMethod.startsWith('custom:')
-    const actualMethod    = isCustom ? 'custom' : payMethod
-    const customMethodId  = isCustom ? payMethod.split(':')[1] : ''
-    const customMethodName = customMethodId ? customMethods.find(m => m._id === customMethodId)?.name || '' : ''
-    const bankProviderName = payBankId ? bankProviders.find(b => b._id === payBankId)?.name || '' : ''
+    // Validate real payment entries
+    for (const e of realPaymentEntries) {
+      if (!e.amount || parseFloat(e.amount) <= 0) continue
+      if (e.method === 'bank' && !e.bankId) { toast.error('Select a bank for bank transfer'); return }
+    }
 
-    // Build cash allocations (allocRows where amount > 0 up to cashAmount)
-    // Build deposit allocations from depositUseAmt using FIFO across active deposits
+    // Validate store credit amount doesn't exceed available balance
+    if (depositUseNum > availableDeposit + 0.01) {
+      toast.error(`Store credit used (${fmtKES(depositUseNum)}) exceeds available balance (${fmtKES(availableDeposit)})`); return
+    }
+
+    // Build payments[] — real money only (store_credit routes to depositAllocations)
+    const payments = realPaymentEntries
+      .filter(e => (parseFloat(e.amount) || 0) > 0)
+      .map(e => {
+        const isCustom = e.method.startsWith('custom:')
+        const method   = isCustom ? 'custom' : e.method
+        const cid      = isCustom ? e.method.split(':')[1] : e.customMethodId
+        const cname    = cid ? (customMethods.find(m => m._id === cid)?.name || '') : e.customMethodName
+        const bname    = e.bankId ? (bankProviders.find(b => b._id === e.bankId)?.name || '') : e.bankName
+        return {
+          method,
+          amount: parseFloat(e.amount),
+          ...(method === 'mobile_money' && e.mpesaCode    ? { mpesaCode: e.mpesaCode }         : {}),
+          ...(method === 'mobile_money' && e.mpesaPhone   ? { mpesaPhone: e.mpesaPhone }       : {}),
+          ...(method === 'bank' && e.bankId               ? { bankProviderId: e.bankId, bankProviderName: bname } : {}),
+          ...(method === 'custom' && cid                  ? { customMethodId: cid, customMethodName: cname }     : {}),
+        }
+      })
+
+    // Build order allocations
     const activeAllocs = allocRows
       .filter(r => (parseFloat(r.amount) || 0) > 0)
       .map(r => ({ saleId: r.saleId, amount: parseFloat(r.amount) }))
 
-    // Deposit allocations: distribute depositUseNum across active deposits FIFO
-    // and allocate against orders proportionally
+    // Build deposit allocations from store_credit entries — FIFO across active deposits
     const depositAllocs: Array<{ depositId: string; amount: number; saleId?: string }> = []
     if (depositUseNum > 0 && activeDeposits.length > 0) {
       let remaining = depositUseNum
       for (const dep of activeDeposits) {
         if (remaining <= 0) break
         const draw = Math.min(remaining, dep.balance)
-        // Attribute to the first unsettled order that hasn't been fully covered by cash
-        const firstUnsettledOrder = allocRows.find(r => {
-          const cashAlloc = parseFloat(r.amount) || 0
-          return r.currentDebt > cashAlloc
-        })
+        const firstUnsettled = allocRows.find(r => r.currentDebt > (parseFloat(r.amount) || 0))
         depositAllocs.push({
           depositId: dep._id,
           amount:    Math.round(draw * 100) / 100,
-          saleId:    firstUnsettledOrder?.saleId,
+          saleId:    firstUnsettled?.saleId,
         })
         remaining = Math.round((remaining - draw) * 100) / 100
       }
     }
 
-    const payload: any = {
-      amount:       payReceivedNum,
-      paymentMethod: actualMethod,
-      note:         payNote || undefined,
-      allocations:  activeAllocs,
+    const apiPayload: any = {
+      payments,
+      note:        payNote || undefined,
+      allocations: activeAllocs,
     }
-    if (depositAllocs.length > 0) payload.depositAllocations = depositAllocs
-    if (isExcess) payload.excess = unallocatedNum
-    if (actualMethod === 'mobile_money') { payload.mpesaCode = payMpesaCode; payload.mpesaPhone = payMpesaPhone }
-    if (actualMethod === 'bank')   { payload.bankProviderId = payBankId; payload.bankProviderName = bankProviderName }
-    if (actualMethod === 'custom') { payload.customMethodId = customMethodId; payload.customMethodName = customMethodName }
+    if (depositAllocs.length > 0) apiPayload.depositAllocations = depositAllocs
+    if (isExcess) apiPayload.excess = unallocatedNum
 
     setPaying(true)
     try {
       const res = await fetch(`/api/customers/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(apiPayload),
       })
       if (res.ok) {
         toast.success(isExcess ? `Payment recorded — KES ${unallocatedNum.toLocaleString()} added to store credit` : 'Payment recorded')
@@ -965,45 +1018,83 @@ function CustomerDetailContent() {
                 {activeDeposits.length === 0 ? (
                   <div className="py-16 text-center text-sm text-gray-400 bg-white rounded-lg border border-gray-200">
                     <PiggyBank size={32} className="mx-auto mb-3 text-gray-300" />
-                    <p className="font-medium">No active store credit</p>
+                    <p className="font-medium">No store credit history</p>
                     <p className="text-xs mt-1">Prepayments and store credit will appear here.</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {activeDeposits.map(dep => (
-                      <div key={dep._id} className="bg-white rounded-lg border border-teal-200 overflow-hidden">
-                        <div className="flex items-center gap-3 px-4 py-3">
-                          <div className="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center shrink-0">
-                            <PiggyBank size={14} className="text-teal-600" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-sm text-gray-900">{dep.receiptNo}</span>
-                              <span className="text-xs text-gray-400">{fmtDate(dep.createdAt)}</span>
-                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                                dep.status === 'active'  ? 'bg-green-100 text-green-700' :
-                                dep.status === 'partial' ? 'bg-amber-100 text-amber-700' :
-                                                           'bg-gray-100 text-gray-500'
-                              }`}>{dep.status}</span>
+                    {activeDeposits.map(dep => {
+                      const isActive = dep.status === 'active' || dep.status === 'partial'
+                      return (
+                        <div key={dep._id} className={`bg-white rounded-lg border overflow-hidden ${isActive ? 'border-teal-200' : 'border-gray-200'}`}>
+                          <div className="flex items-center gap-3 px-4 py-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isActive ? 'bg-teal-100' : 'bg-gray-100'}`}>
+                              <PiggyBank size={14} className={isActive ? 'text-teal-600' : 'text-gray-400'} />
                             </div>
-                            <div className="flex items-center gap-3 mt-0.5">
-                              <span className="text-xs text-gray-500">Original: {fmtKES(dep.amount)}</span>
-                              <span className="text-xs text-gray-500">{methodLabel(dep.method)}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-sm text-gray-900">{dep.receiptNo}</span>
+                                <span className="text-xs text-gray-400">{fmtDate(dep.createdAt)}</span>
+                                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                                  dep.status === 'active'   ? 'bg-green-100 text-green-700' :
+                                  dep.status === 'partial'  ? 'bg-amber-100 text-amber-700' :
+                                  dep.status === 'used'     ? 'bg-gray-100 text-gray-500'   :
+                                  dep.status === 'refunded' ? 'bg-orange-100 text-orange-600' :
+                                                              'bg-gray-100 text-gray-400'
+                                }`}>{dep.status}</span>
+                              </div>
+                              <div className="flex items-center gap-3 mt-0.5">
+                                <span className="text-xs text-gray-500">Original: {fmtKES(dep.amount)}</span>
+                                <span className="text-xs text-gray-500">{methodLabel(dep.method)}</span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className={`text-sm font-bold ${isActive ? 'text-teal-700' : 'text-gray-400'}`}>{fmtKES(dep.balance)}</p>
+                              <p className="text-xs text-gray-400">{isActive ? 'remaining' : 'balance'}</p>
                             </div>
                           </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-sm font-bold text-teal-700">{fmtKES(dep.balance)}</p>
-                            <p className="text-xs text-gray-400">remaining</p>
-                          </div>
+                          {dep.note && (
+                            <p className="px-4 pb-2 text-xs text-gray-400">{dep.note}</p>
+                          )}
+                          {/* Consumptions history */}
+                          {dep.consumptions && dep.consumptions.length > 0 && (
+                            <div className="border-t border-gray-100 bg-gray-50 px-4 py-2">
+                              <p className="text-xs font-medium text-gray-500 mb-1.5">Usage history</p>
+                              <div className="space-y-1">
+                                {dep.consumptions.map((c: any, i: number) => (
+                                  <div key={i} className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-500">
+                                      {c.date ? fmtDate(c.date) : '—'}
+                                      {c.note ? ` · ${c.note}` : ''}
+                                    </span>
+                                    <span className="font-medium text-gray-700">−{fmtKES(c.amount)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {/* Refunds history */}
+                          {dep.refunds && dep.refunds.length > 0 && (
+                            <div className="border-t border-gray-100 bg-orange-50 px-4 py-2">
+                              <p className="text-xs font-medium text-orange-600 mb-1.5">Refunds</p>
+                              <div className="space-y-1">
+                                {dep.refunds.map((r: any, i: number) => (
+                                  <div key={i} className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-500">{r.date ? fmtDate(r.date) : '—'}</span>
+                                    <span className="font-medium text-orange-600">−{fmtKES(r.amount)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        {dep.note && (
-                          <p className="px-4 pb-2 text-xs text-gray-400">{dep.note}</p>
-                        )}
-                      </div>
-                    ))}
-                    <p className="text-xs text-gray-400 pt-1 text-center">
-                      Use store credit when recording a payment via "Record Payment"
-                    </p>
+                      )
+                    })}
+                    {activeDeposits.some(d => d.status === 'active' || d.status === 'partial') && (
+                      <p className="text-xs text-gray-400 pt-1 text-center">
+                        Use store credit when recording a payment via "Record Payment"
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1022,88 +1113,134 @@ function CustomerDetailContent() {
 
           <div className="flex-1 overflow-y-auto space-y-4 mt-2 pr-1">
 
-            {/* Payment method + cash amount */}
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium text-gray-700">Payment Method *</label>
-                <select value={payMethod}
-                  onChange={e => { setPayMethod(e.target.value); setPayMpesaCode(''); setPayMpesaPhone(''); setPayBankId('') }}
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <optgroup label="Standard Methods">
-                    <option value="cash">Cash</option>
-                    <option value="mobile_money">M-Pesa / Mobile Money</option>
-                    <option value="card">Card</option>
-                    {bankProviders.length > 0 && <option value="bank">Bank Transfer</option>}
-                  </optgroup>
-                  {customMethods.length > 0 && (
-                    <optgroup label="Custom Methods">
-                      {customMethods.map(m => <option key={m._id} value={`custom:${m._id}`}>{m.name}</option>)}
-                    </optgroup>
-                  )}
-                </select>
+            {/* ── Payment methods list ───────────────────────────────────── */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-700">Payment Received</p>
+                <button
+                  onClick={() => setPaymentEntries(prev => [...prev, makePayEntry('cash')])}
+                  className="text-xs text-green-700 font-semibold hover:text-green-800 flex items-center gap-1"
+                >
+                  + Add method
+                </button>
               </div>
 
-              {payMethod === 'mobile_money' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">M-Pesa Code</label>
-                    <Input className="mt-1" value={payMpesaCode} onChange={e => setPayMpesaCode(e.target.value)} placeholder="e.g. SG7XK3M9" />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">M-Pesa Phone</label>
-                    <Input className="mt-1" value={payMpesaPhone} onChange={e => setPayMpesaPhone(e.target.value)} placeholder="0712345678" />
-                  </div>
-                </div>
-              )}
-              {payMethod === 'bank' && (
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Bank *</label>
-                  <select value={payBankId} onChange={e => setPayBankId(e.target.value)}
-                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                    <option value="">Select bank</option>
-                    {bankProviders.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="text-sm font-medium text-gray-700">Cash / M-Pesa Received</label>
-                <Input className="mt-1" type="number" value={payReceived}
-                  onChange={e => setPayReceived(e.target.value)} placeholder="0" autoFocus />
-              </div>
-
-              {/* Store credit row — only shown if customer has deposit balance */}
-              {availableDeposit > 0 && (
-                <div className="bg-teal-50 border border-teal-200 rounded-lg px-3 py-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold text-teal-700">Use Store Credit</p>
-                      <p className="text-xs text-teal-500 mt-0.5">Available: {fmtKES(availableDeposit)}</p>
+              {paymentEntries.map((entry, idx) => {
+                const isCustom = entry.method.startsWith('custom:')
+                const resolvedMethod = isCustom ? 'custom' : entry.method
+                const isStoreCredit = entry.method === 'store_credit'
+                const creditAmt = parseFloat(entry.amount) || 0
+                const overCredit = isStoreCredit && creditAmt > availableDeposit + 0.01
+                return (
+                  <div key={entry.id} className={`rounded-lg border px-3 py-2.5 space-y-2 ${isStoreCredit ? 'border-teal-200 bg-teal-50' : 'border-gray-200 bg-gray-50'}`}>
+                    <div className="flex items-center gap-2">
+                      {/* Method selector */}
+                      <select
+                        value={entry.method}
+                        onChange={e => updatePayEntry(entry.id, { method: e.target.value, mpesaCode: '', mpesaPhone: '', bankId: '', bankName: '' })}
+                        className={`flex-1 border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 bg-white ${isStoreCredit ? 'border-teal-300 focus:ring-teal-500' : 'border-gray-300 focus:ring-green-500'}`}
+                      >
+                        <optgroup label="Standard">
+                          <option value="cash">Cash</option>
+                          <option value="mobile_money">M-Pesa / Mobile Money</option>
+                          <option value="card">Card</option>
+                          {bankProviders.length > 0 && <option value="bank">Bank Transfer</option>}
+                        </optgroup>
+                        {availableDeposit > 0 && (
+                          <optgroup label="Store Credit">
+                            <option value="store_credit">Store Credit (KES {availableDeposit.toLocaleString()} available)</option>
+                          </optgroup>
+                        )}
+                        {customMethods.length > 0 && (
+                          <optgroup label="Custom">
+                            {customMethods.map(m => (
+                              <option key={m._id} value={`custom:${m._id}`}>{m.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                      {/* Amount */}
+                      <div className="w-32 shrink-0">
+                        <Input
+                          type="number"
+                          value={entry.amount}
+                          onChange={e => {
+                            if (isStoreCredit) {
+                              const v = parseFloat(e.target.value) || 0
+                              if (v > availableDeposit) return
+                            }
+                            updatePayEntry(entry.id, { amount: e.target.value })
+                          }}
+                          placeholder="0"
+                          className={`text-right text-sm ${overCredit ? 'border-red-400' : ''}`}
+                          autoFocus={idx === 0}
+                        />
+                      </div>
+                      {/* Remove */}
+                      {paymentEntries.length > 1 && (
+                        <button
+                          onClick={() => removePayEntry(entry.id)}
+                          className="text-gray-400 hover:text-red-500 transition-colors shrink-0"
+                          title="Remove"
+                        >
+                          <span className="text-lg leading-none">×</span>
+                        </button>
+                      )}
                     </div>
-                    <div className="w-28">
-                      <Input
-                        type="number"
-                        value={depositUseAmt}
-                        onChange={e => {
-                          const v = parseFloat(e.target.value) || 0
-                          if (v > availableDeposit) return
-                          setDepositUseAmt(e.target.value)
-                        }}
-                        placeholder="0"
-                        className="text-right text-sm border-teal-300 focus:ring-teal-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
 
-              <div>
-                <label className="text-sm font-medium text-gray-700">Note (optional)</label>
-                <Input className="mt-1" value={payNote} onChange={e => setPayNote(e.target.value)} placeholder="e.g. Partial settlement" />
-              </div>
+                    {/* Store credit available hint */}
+                    {isStoreCredit && (
+                      <p className={`text-xs ${overCredit ? 'text-red-500' : 'text-teal-600'}`}>
+                        {overCredit
+                          ? `Exceeds available balance of ${fmtKES(availableDeposit)}`
+                          : `Available: ${fmtKES(availableDeposit)}`}
+                      </p>
+                    )}
+
+                    {/* M-Pesa fields */}
+                    {resolvedMethod === 'mobile_money' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-gray-500">M-Pesa Code</label>
+                          <Input className="mt-0.5 text-sm" value={entry.mpesaCode}
+                            onChange={e => updatePayEntry(entry.id, { mpesaCode: e.target.value })}
+                            placeholder="e.g. SG7XK3M9" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-500">Phone</label>
+                          <Input className="mt-0.5 text-sm" value={entry.mpesaPhone}
+                            onChange={e => updatePayEntry(entry.id, { mpesaPhone: e.target.value })}
+                            placeholder="0712345678" />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Bank selector */}
+                    {resolvedMethod === 'bank' && (
+                      <div>
+                        <label className="text-xs text-gray-500">Bank *</label>
+                        <select
+                          value={entry.bankId}
+                          onChange={e => updatePayEntry(entry.id, { bankId: e.target.value })}
+                          className="mt-0.5 w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                        >
+                          <option value="">Select bank</option>
+                          {bankProviders.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
 
-            {/* Order allocation list */}
+            {/* ── Note ──────────────────────────────────────────────────── */}
+            <div>
+              <label className="text-sm font-medium text-gray-700">Note (optional)</label>
+              <Input className="mt-1" value={payNote} onChange={e => setPayNote(e.target.value)} placeholder="e.g. Partial settlement" />
+            </div>
+
+            {/* ── Order allocation list ──────────────────────────────────── */}
             <div>
               <p className="text-sm font-semibold text-gray-700 mb-2">Allocate to Orders</p>
               {allocRows.length === 0 ? (
@@ -1141,25 +1278,35 @@ function CustomerDetailContent() {
               )}
             </div>
 
-            {/* Running tally */}
+            {/* ── Running tally ─────────────────────────────────────────── */}
             {totalIncoming > 0 && (
               <div className={`rounded-lg border px-3 py-2.5 text-sm ${
                 isExcess ? 'bg-blue-50 border-blue-200' :
                 !isUnder  ? 'bg-green-50 border-green-200' :
                             'bg-amber-50 border-amber-200'
               }`}>
-                {payReceivedNum > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Cash received</span>
-                    <span className="font-semibold text-gray-900">{fmtKES(payReceivedNum)}</span>
-                  </div>
-                )}
-                {depositUseNum > 0 && (
-                  <div className="flex justify-between mt-0.5">
-                    <span className="text-teal-600">Store credit</span>
-                    <span className="font-semibold text-teal-700">{fmtKES(depositUseNum)}</span>
-                  </div>
-                )}
+                {paymentEntries.filter(e => (parseFloat(e.amount) || 0) > 0).map(e => {
+                  const isStoreCredit = e.method === 'store_credit'
+                  const isC = e.method.startsWith('custom:')
+                  const m = isC ? 'custom' : e.method
+                  const label = isStoreCredit ? 'Store Credit'
+                    : m === 'cash' ? 'Cash'
+                    : m === 'mobile_money' ? 'M-Pesa'
+                    : m === 'card' ? 'Card'
+                    : m === 'bank' ? (bankProviders.find(b => b._id === e.bankId)?.name || 'Bank')
+                    : m === 'custom' ? (customMethods.find(cm => `custom:${cm._id}` === e.method)?.name || 'Custom')
+                    : m
+                  return (
+                    <div key={e.id} className={`flex justify-between ${isStoreCredit ? 'text-teal-700' : ''}`}>
+                      <span className={isStoreCredit ? 'text-teal-600' : 'text-gray-600'}>{label}</span>
+                      <span className="font-semibold">{fmtKES(parseFloat(e.amount) || 0)}</span>
+                    </div>
+                  )
+                })}
+                <div className="flex justify-between mt-1 pt-1 border-t border-gray-200">
+                  <span className="text-gray-600">Total incoming</span>
+                  <span className="font-semibold text-gray-900">{fmtKES(totalIncoming)}</span>
+                </div>
                 <div className="flex justify-between mt-0.5">
                   <span className="text-gray-600">Allocated to orders</span>
                   <span className="font-semibold text-gray-900">{fmtKES(cashAllocTotal)}</span>
