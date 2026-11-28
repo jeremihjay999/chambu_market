@@ -70,6 +70,21 @@ const quotationShareSchema = new mongoose.Schema(
   { collection: 'quotation_shares' }
 )
 
+// Sale receipt share registry — same pattern as quotation shares.
+// Maps a public receipt token to the tenant DB that holds the sale.
+// The public /r/[token] route uses this to look up the sale without auth.
+const saleShareSchema = new mongoose.Schema(
+  {
+    shareToken:       { type: String, required: true, unique: true, index: true },
+    userId:           { type: String, required: true },
+    saleId:           { type: String, required: true },
+    mongoUri:         { type: String, default: '' },
+    mongoUriFallback: { type: String, default: '' },
+    createdAt:        { type: Date, default: Date.now },
+  },
+  { collection: 'sale_shares' }
+)
+
 export async function getAdminModels() {
   const conn = await connectAdminDB()
   // Always re-register to pick up schema changes (safe — Mongoose deduplicates internally
@@ -80,5 +95,6 @@ export async function getAdminModels() {
   const Cluster = conn.model('Cluster', clusterSchema)
   const UserEmailIndex = conn.models.UserEmailIndex || conn.model('UserEmailIndex', userEmailIndexSchema)
   const QuotationShare = conn.models.QuotationShare || conn.model('QuotationShare', quotationShareSchema)
-  return { Tenant, Cluster, UserEmailIndex, QuotationShare }
+  const SaleShare      = conn.models.SaleShare      || conn.model('SaleShare',      saleShareSchema)
+  return { Tenant, Cluster, UserEmailIndex, QuotationShare, SaleShare }
 }

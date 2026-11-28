@@ -661,17 +661,7 @@ function InventoryPageContent() {
                       >
                         <Edit2 size={14} />
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 px-2 hover:bg-red-50"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDeleteProduct(product._id)
-                        }}
-                      >
-                        <Trash2 size={14} className="text-red-500" />
-                      </Button>
+
                     </div>
                   </div>
                 )
@@ -884,10 +874,7 @@ function InventoryPageContent() {
                     <Button onClick={() => { setIsViewOpen(false); setIsEditOpen(true) }} className="flex-1">
                       <Edit2 size={16} className="mr-2" />Edit Product
                     </Button>
-                    <Button onClick={() => { setIsViewOpen(false); handleDeleteProduct(selectedProduct._id) }}
-                      variant="destructive" className="flex-1">
-                      <Trash2 size={16} className="mr-2" />Delete Product
-                    </Button>
+                    {/* Delete button hidden intentionally */}
                   </div>
                 </div>
               </TabsContent>

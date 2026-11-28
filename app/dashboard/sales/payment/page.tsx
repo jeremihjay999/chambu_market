@@ -706,6 +706,7 @@ function PaymentPageContent() {
         const orderNumber = result.sale?.orderNumber || `ORD-${String(result.sale?._id ?? '').slice(-5).toUpperCase()}`
 
         setLastSale({
+          saleId: result.sale._id,
           items: cart.map(item => ({
             productName: item.productName,
             brand: item.brand,
@@ -1425,6 +1426,8 @@ function PaymentPageContent() {
           discount={lastSale.discount}
           onPrintReceipt={() => receiptRef.current?.print()}
           customerPhone={lastSale.customerPhone}
+          saleId={lastSale.saleId}
+          publicBaseUrl={shopSettings?.general?.publicBaseUrl}
           onMakeNewSale={() => { 
             sessionStorage.removeItem('pendingSale')
             sessionStorage.removeItem('activeCart')

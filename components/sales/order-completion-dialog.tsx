@@ -33,6 +33,8 @@ interface OrderCompletionDialogProps {
   onPrintReceipt: () => void
   onMakeNewSale: () => void
   customerPhone?: string
+  saleId?: string
+  publicBaseUrl?: string
 }
 
 export function OrderCompletionDialog({
@@ -49,6 +51,8 @@ export function OrderCompletionDialog({
   onPrintReceipt,
   onMakeNewSale,
   customerPhone,
+  saleId,
+  publicBaseUrl,
 }: OrderCompletionDialogProps) {
   const router = useRouter()
   const [showSendOptions, setShowSendOptions] = useState(false)
@@ -147,45 +151,35 @@ export function OrderCompletionDialog({
     return digits
   }
 
-  function handleSendViaWhatsApp() {
+  async function handleSendViaWhatsApp() {
     if (!phoneNumber) {
       alert('Please enter a phone number')
       return
     }
-    
-    // Build detailed receipt message
-    let message = `*${shopName.toUpperCase()} RECEIPT*\n\n`
-    message += `Order: ${orderNumber}\n`
-    message += `Items: ${itemCount}\n`
-    message += `Cashier: ${cashierName}\n\n`
-    
-    message += `*Items:*\n`
-    if (items.length > 0) {
-      items.forEach((item) => {
-        message += `• ${item.productName}\n`
-        message += `  Qty: ${item.quantity} × KES ${item.price.toFixed(2)}\n`
-        if (item.discount > 0) {
-          message += `  Discount: -KES ${item.discount.toFixed(2)}\n`
+
+    let receiptUrl = ''
+    if (saleId) {
+      try {
+        const res = await fetch(`/api/sales/${saleId}/share`, { method: 'POST' })
+        if (res.ok) {
+          const data = await res.json()
+          const base = publicBaseUrl || window.location.origin
+          receiptUrl = `${base}/r/${data.receiptToken}`
         }
-        message += `  Total: KES ${item.total.toFixed(2)}\n\n`
-      })
+      } catch { /* non-fatal — fall back to plain text */ }
     }
-    
-    message += `*Summary:*\n`
-    if (subtotal > 0) {
-      message += `Subtotal: KES ${subtotal.toFixed(2)}\n`
+
+    let message = `*${shopName.toUpperCase()} RECEIPT*\n`
+    message += `Order: ${orderNumber}\n`
+    message += `Total: KES ${totalAmount.toFixed(2)}\n`
+    message += `Cashier: ${cashierName}\n`
+    if (receiptUrl) {
+      message += `\nView & download receipt:\n${receiptUrl}`
     }
-    if (discount > 0) {
-      message += `Discount: -KES ${discount.toFixed(2)}\n`
-    }
-    message += `*Total: KES ${totalAmount.toFixed(2)}*\n\n`
-    message += `Thank you for shopping with us!\n`
-    message += `Powered by Chambu Digital`
-    
+
     const whatsappUrl = `https://wa.me/${formatPhone(phoneNumber)}?text=${encodeURIComponent(message)}`
     window.open(whatsappUrl, '_blank')
     setShowSendOptions(false)
-    // Auto-dismiss and navigate
     setTimeout(() => {
       onOpenChange(false)
       onMakeNewSale()

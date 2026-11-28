@@ -87,7 +87,14 @@ interface ActiveDeposit {
   balance: number
   status: string
   method: string
+  bankProviderName?: string
+  customMethodName?: string
+  mpesaCode?: string
+  mpesaPhone?: string
+  paymentReference?: string
   createdAt: string
+  createdByName?: string | null
+  branchName?: string | null
   note?: string
   consumptions?: Array<{ amount: number; date?: string; note?: string }>
   refunds?: Array<{ amount: number; date?: string }>
@@ -189,6 +196,18 @@ function methodLabel(method?: string) {
   if (method === 'bank')         return 'Bank'
   if (method === 'custom')       return 'Custom'
   return method
+}
+
+function depositMethodLabel(dep: ActiveDeposit): string {
+  if (dep.method === 'cash') return 'Cash'
+  if (dep.method === 'card') return 'Card'
+  if (dep.method === 'mobile_money') {
+    if (dep.mpesaCode) return `M-Pesa (${dep.mpesaCode})`
+    return 'M-Pesa'
+  }
+  if (dep.method === 'bank') return dep.bankProviderName || 'Bank Transfer'
+  if (dep.method === 'custom') return dep.customMethodName || 'Custom'
+  return dep.method
 }
 
 function buildAccountWhatsApp(customer: Customer, shopName: string): string {
@@ -490,11 +509,13 @@ function CustomerDetailContent() {
       let remaining = depositUseNum
       for (const dep of activeDeposits) {
         if (remaining <= 0) break
-        const draw = Math.min(remaining, dep.balance)
+        if (!dep.balance || dep.balance <= 0) continue          // skip zero-balance deposits
+        const draw = Math.round(Math.min(remaining, dep.balance) * 100) / 100
+        if (draw <= 0) continue                                  // never push a zero-amount entry
         const firstUnsettled = allocRows.find(r => r.currentDebt > (parseFloat(r.amount) || 0))
         depositAllocs.push({
           depositId: dep._id,
-          amount:    Math.round(draw * 100) / 100,
+          amount:    draw,
           saleId:    firstUnsettled?.saleId,
         })
         remaining = Math.round((remaining - draw) * 100) / 100
@@ -1043,19 +1064,38 @@ function CustomerDetailContent() {
                                                               'bg-gray-100 text-gray-400'
                                 }`}>{dep.status}</span>
                               </div>
-                              <div className="flex items-center gap-3 mt-0.5">
-                                <span className="text-xs text-gray-500">Original: {fmtKES(dep.amount)}</span>
-                                <span className="text-xs text-gray-500">{methodLabel(dep.method)}</span>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                                <span className="text-xs text-gray-500">
+                                  Original: {fmtKES(dep.amount)}
+                                </span>
+                                <span className="text-xs font-medium text-gray-700">
+                                  {depositMethodLabel(dep)}
+                                </span>
+                                {dep.paymentReference && (
+                                  <span className="text-xs text-gray-400">Ref: {dep.paymentReference}</span>
+                                )}
                               </div>
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+                                {dep.createdByName && (
+                                  <span className="text-xs text-gray-400">
+                                    By: <span className="text-gray-600 font-medium">{dep.createdByName}</span>
+                                  </span>
+                                )}
+                                {dep.branchName && (
+                                  <span className="text-xs text-gray-400">
+                                    Branch: <span className="text-gray-600 font-medium">{dep.branchName}</span>
+                                  </span>
+                                )}
+                              </div>
+                              {dep.note && (
+                                <p className="text-xs text-gray-400 mt-0.5 italic">{dep.note}</p>
+                              )}
                             </div>
                             <div className="text-right shrink-0">
                               <p className={`text-sm font-bold ${isActive ? 'text-teal-700' : 'text-gray-400'}`}>{fmtKES(dep.balance)}</p>
                               <p className="text-xs text-gray-400">{isActive ? 'remaining' : 'balance'}</p>
                             </div>
                           </div>
-                          {dep.note && (
-                            <p className="px-4 pb-2 text-xs text-gray-400">{dep.note}</p>
-                          )}
                           {/* Consumptions history */}
                           {dep.consumptions && dep.consumptions.length > 0 && (
                             <div className="border-t border-gray-100 bg-gray-50 px-4 py-2">

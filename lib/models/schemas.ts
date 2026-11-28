@@ -80,6 +80,7 @@ export const saleSchema = new mongoose.Schema(
     branchId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }, // Branch where sale was made
     staffId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     orderNumber:   { type: String, index: true },
+    receiptToken:  { type: String, default: null, index: true, sparse: true },
     customerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
     customerName:  { type: String, default: '' },
     items: [{

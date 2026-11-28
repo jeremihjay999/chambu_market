@@ -49,6 +49,7 @@ function CustomersContent() {
   const [loading, setLoading] = useState(true)
   const [isOffline, setIsOffline] = useState(false)
   const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<'all' | 'debt' | 'credit' | 'clear'>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
 
   // Add customer
@@ -301,8 +302,26 @@ Thank you for choosing ${businessName}!`
     toast.success('Opening WhatsApp...')
   }
 
-  const totalDebt = customers.reduce((s, c) => s + c.creditBalance, 0)
+  const totalDebt     = customers.reduce((s, c) => s + c.creditBalance, 0)
   const totalDeposits = customers.reduce((s, c) => s + (c.depositBalance || 0), 0)
+
+  // ── Filter + sort ─────────────────────────────────────────────────────────
+  const counts = {
+    all:    customers.length,
+    debt:   customers.filter(c => c.creditBalance > 0).length,
+    credit: customers.filter(c => (c.depositBalance || 0) > 0).length,
+    clear:  customers.filter(c => c.creditBalance === 0 && (c.depositBalance || 0) === 0).length,
+  }
+
+  const displayedCustomers = (() => {
+    let list = customers
+    if (filter === 'debt')   list = list.filter(c => c.creditBalance > 0)
+    if (filter === 'credit') list = list.filter(c => (c.depositBalance || 0) > 0)
+    if (filter === 'clear')  list = list.filter(c => c.creditBalance === 0 && (c.depositBalance || 0) === 0)
+    // Sort debt view by highest debt first — most useful for collections
+    if (filter === 'debt') list = [...list].sort((a, b) => b.creditBalance - a.creditBalance)
+    return list
+  })()
 
   return (
     <div className="space-y-4">
@@ -336,6 +355,33 @@ Thank you for choosing ${businessName}!`
         />
       </div>
 
+      {/* Filters */}
+      <div className="flex gap-2 flex-wrap">
+        {([
+          { key: 'all',    label: 'All',          color: 'gray'  },
+          { key: 'debt',   label: 'Has Debt',      color: 'red'   },
+          { key: 'credit', label: 'Store Credit',  color: 'teal'  },
+          { key: 'clear',  label: 'Clear',         color: 'green' },
+        ] as { key: typeof filter; label: string; color: string }[]).map(f => {
+          const count = counts[f.key]
+          const active = filter === f.key
+          const colorMap: Record<string, { active: string; inactive: string; badge: string }> = {
+            gray:  { active: 'bg-gray-800 text-white border-gray-800',   inactive: 'bg-white text-gray-600 border-gray-200 hover:border-gray-400',   badge: active ? 'bg-gray-600 text-white' : 'bg-gray-100 text-gray-500' },
+            red:   { active: 'bg-red-600 text-white border-red-600',     inactive: 'bg-white text-red-600 border-red-200 hover:border-red-400',       badge: active ? 'bg-red-400 text-white'  : 'bg-red-50 text-red-500'   },
+            teal:  { active: 'bg-teal-600 text-white border-teal-600',   inactive: 'bg-white text-teal-600 border-teal-200 hover:border-teal-400',   badge: active ? 'bg-teal-400 text-white' : 'bg-teal-50 text-teal-600' },
+            green: { active: 'bg-green-600 text-white border-green-600', inactive: 'bg-white text-green-600 border-green-200 hover:border-green-400', badge: active ? 'bg-green-400 text-white': 'bg-green-50 text-green-600'},
+          }
+          const c = colorMap[f.color]
+          return (
+            <button key={f.key} onClick={() => setFilter(f.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${active ? c.active : c.inactive}`}>
+              {f.label}
+              <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${c.badge}`}>{count}</span>
+            </button>
+          )
+        })}
+      </div>
+
       {/* Customer Cards Grid */}
       <LoadingOrOffline
         isLoading={loading}
@@ -344,13 +390,13 @@ Thank you for choosing ${businessName}!`
         loadingText="Loading customers..."
         offlineMessage="Unable to load customers. Please check your connection."
       >
-        {customers.length === 0 ? (
+        {displayedCustomers.length === 0 ? (
           <div className="py-16 text-center text-gray-400 text-sm">
-            {search ? 'No customers match your search.' : 'No customers yet. Add your first one.'}
+            {search ? 'No customers match your search.' : filter !== 'all' ? `No customers in this category.` : 'No customers yet. Add your first one.'}
           </div>
         ) : (
           <div className="space-y-2">
-            {customers.map(c => {
+            {displayedCustomers.map(c => {
               const hasCredit   = c.creditBalance > 0
               const hasDeposit  = (c.depositBalance || 0) > 0
               const isClear     = !hasCredit && !hasDeposit

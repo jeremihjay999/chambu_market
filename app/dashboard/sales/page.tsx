@@ -1499,6 +1499,8 @@ function SalesPageContent() {
           discount={lastSale.discount}
           onPrintReceipt={() => receiptRef.current?.print()}
           onMakeNewSale={handleMakeNewSale}
+          saleId={lastSale.saleId}
+          publicBaseUrl={shopSettings?.general?.publicBaseUrl}
         />
       )}
 

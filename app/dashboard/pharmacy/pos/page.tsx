@@ -373,6 +373,7 @@ function PharmacyPOSContent() {
         const orderNumber = result.sale?.orderNumber || `RX-${result.sale?._id?.slice(-6).toUpperCase()}`
 
         setLastSale({
+          saleId: result.sale._id,
           items: cart.map(i => ({
             productName: i.productName, brand: i.brand,
             quantity: i.quantity, price: i.sellingPrice, discount: i.discount,
@@ -828,6 +829,8 @@ function PharmacyPOSContent() {
           discount={lastSale.discount}
           onPrintReceipt={() => receiptRef.current?.print()}
           onMakeNewSale={() => { setShowCompletion(false); searchRef.current?.focus() }}
+          saleId={lastSale.saleId}
+          publicBaseUrl={shopSettings?.general?.publicBaseUrl}
         />
       )}
 

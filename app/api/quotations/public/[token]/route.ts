@@ -63,17 +63,37 @@ export async function GET(
     const s: any = user?.settings || {}
     const general = s.general || s.shop || {}
     const payment = s.payment || {}
+
+    // Branch contact — look up the branch the quotation was created at and
+    // prefer its phone/address over the global shop settings.
+    let branchName = ''
+    let branchPhone = ''
+    let branchEmail = ''
+    let branchAddress = ''
+    if (quotation.branchId) {
+      const branch = (await models.Branch.findById(quotation.branchId).lean()) as any
+      if (branch) {
+        branchName    = branch.name || ''
+        const phones  = (branch.phones || []).filter((p: string) => p?.trim())
+        branchPhone   = phones.length > 0 ? phones.join(' / ') : (branch.phone || '')
+        const emails  = (branch.emails || []).filter((e: string) => e?.trim())
+        branchEmail   = emails.length > 0 ? emails.join(' / ') : ''
+        branchAddress = branch.address || ''
+      }
+    }
+
     const shop = {
-      shopName: general.shopName || user?.shopName || '',
-      logo: general.logo || '',
-      phone: general.phone || user?.phone || '',
-      email: general.email || user?.email || '',
-      address: general.address || '',
-      quotationTerms: s.quotationTerms || '',
-      mpesaPaybill: payment.mpesaPaybill || s.mpesaPaybill || '',
+      shopName:           general.shopName || user?.shopName || '',
+      logo:               general.logo || '',
+      phone:              branchPhone  || general.phone  || user?.phone  || '',
+      email:              branchEmail  || general.email  || user?.email  || '',
+      address:            branchAddress || general.address || '',
+      quotationTerms:     s.quotationTerms || '',
+      mpesaPaybill:       payment.mpesaPaybill || s.mpesaPaybill || '',
       mpesaAccountNumber: payment.mpesaAccountNumber || s.mpesaAccountNumber || '',
-      bankDetails: s.bankDetails || '',
-      website: s.website || '',
+      bankDetails:        s.bankDetails || '',
+      website:            s.website || '',
+      branchName,
     }
 
     const { subtotal, total, paid, remaining } = computeTotals(

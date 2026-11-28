@@ -7,6 +7,10 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // @react-pdf/renderer must run in the Node.js runtime, not the Edge runtime.
+  // Marking it as an external server component package prevents Next.js from
+  // bundling it with the client and avoids canvas/worker import errors.
+  serverExternalPackages: ['@react-pdf/renderer'],
   images: {
     remotePatterns: [
       {
